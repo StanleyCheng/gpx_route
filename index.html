@@ -983,9 +983,10 @@
     view3dEnabled = readPreference('3d-enabled') === 'true';
     ui.view3dToggle.checked = view3dEnabled;
 
-    mapLoaded.then(() => setViewMode(view3dEnabled, false));
     readSavedRoute()
-      .then((saved) => saved && setup(parseGpx(saved.xmlText), saved.fileName))
+      .then((saved) => saved
+        ? setup(parseGpx(saved.xmlText), saved.fileName)
+        : mapLoaded.then(() => setViewMode(view3dEnabled, false)))
       .catch(() => setStatus('Choose a GPX file to begin.'));
   </script>
 </body>
