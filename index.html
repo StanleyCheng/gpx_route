@@ -5,20 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111815">
   <meta property="og:title" content="GPX Route Replay">
-  <meta property="og:description" content="Open a GPX file on your device and replay the route on an animated map.">
+  <meta property="og:description" content="Open a GPX file on your device and replay the route on a 2D or 3D animated map.">
   <meta property="og:image" content="__SITE_ORIGIN__/og.png">
   <meta name="twitter:card" content="summary_large_image">
   <title>GPX Route Replay</title>
   <link rel="icon" href="data:,">
-  <link rel="preconnect" href="https://tile.openstreetmap.org">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <link rel="preconnect" href="https://api.maptiler.com">
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.19.0/dist/maplibre-gl.css">
   <style>
     :root {
       color-scheme: dark;
       --ink: #f4f7f5;
       --muted: #a7b0ab;
-      --panel: rgba(15, 20, 18, .88);
+      --panel: rgba(15, 20, 18, .9);
       --line: rgba(255, 255, 255, .13);
       --accent: #c9ff45;
       --route: #e21d2f;
@@ -40,21 +39,19 @@
     .shade {
       position: fixed;
       inset: 0;
-      z-index: 400;
+      z-index: 2;
       pointer-events: none;
       background:
-        linear-gradient(180deg, rgba(7, 11, 9, .48), transparent 22%),
-        linear-gradient(0deg, rgba(7, 11, 9, .68), transparent 34%);
+        linear-gradient(180deg, rgba(7, 11, 9, .5), transparent 22%),
+        linear-gradient(0deg, rgba(7, 11, 9, .7), transparent 34%);
     }
 
     .topbar {
       position: fixed;
-      z-index: 500;
+      z-index: 3;
       top: max(22px, env(safe-area-inset-top));
       left: max(24px, env(safe-area-inset-left));
-      display: flex;
-      align-items: flex-start;
-      gap: 16px;
+      max-width: calc(100% - 120px);
       padding: 14px 16px;
       border: 1px solid rgba(255, 255, 255, .12);
       border-radius: 16px;
@@ -74,24 +71,23 @@
 
     h1 {
       margin: 0;
+      overflow: hidden;
       font-size: clamp(24px, 4vw, 42px);
       line-height: .95;
       letter-spacing: -.055em;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
-    .summary {
-      margin: 9px 0 0;
-      color: rgba(244, 247, 245, .76);
-      font-size: 13px;
-    }
+    .summary { margin: 9px 0 0; color: rgba(244, 247, 245, .76); font-size: 13px; }
 
     .control-panel {
       position: fixed;
-      z-index: 500;
+      z-index: 3;
       right: max(24px, env(safe-area-inset-right));
       bottom: max(24px, env(safe-area-inset-bottom));
       left: max(24px, env(safe-area-inset-left));
-      max-width: 880px;
+      max-width: 920px;
       margin: auto;
       padding: 16px;
       border: 1px solid var(--line);
@@ -114,26 +110,12 @@
     }
 
     .panel-details { transition: opacity .15s; }
-
-    .compact-bar {
-      display: none;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .compact-distance {
-      min-width: 0;
-      margin-right: auto;
-    }
-
+    .compact-bar { display: none; align-items: center; gap: 10px; }
+    .compact-distance { min-width: 0; margin-right: auto; }
     .compact-distance .label { margin-bottom: 1px; }
     .compact-distance .value { font-size: 16px; }
 
-    .control-panel.collapsed {
-      max-width: 360px;
-      padding: 8px;
-    }
-
+    .control-panel.collapsed { max-width: 360px; padding: 8px; }
     .control-panel.collapsed .panel-details,
     .control-panel.collapsed .dashboard-collapse { display: none; }
     .control-panel.collapsed .compact-bar { display: flex; }
@@ -147,10 +129,7 @@
       font-size: 17px;
     }
 
-    .dashboard-expand {
-      width: 42px;
-      flex: 0 0 42px;
-    }
+    .dashboard-expand { width: 42px; flex: 0 0 42px; }
 
     .stats {
       display: grid;
@@ -159,13 +138,9 @@
       margin-bottom: 14px;
     }
 
-    .stat {
-      min-width: 0;
-      padding: 0 10px;
-      border-left: 1px solid var(--line);
-    }
-
+    .stat { min-width: 0; padding: 0 10px; border-left: 1px solid var(--line); }
     .stat:first-child { border-left: 0; }
+
     .label {
       display: block;
       margin-bottom: 3px;
@@ -193,16 +168,8 @@
       align-items: center;
     }
 
-    .secondary-controls {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .marker-switches {
-      display: grid;
-      gap: 8px;
-    }
+    .secondary-controls { display: flex; align-items: center; gap: 14px; }
+    .toggle-grid { display: grid; grid-template-columns: repeat(2, max-content); gap: 8px 14px; }
 
     button {
       height: 42px;
@@ -221,36 +188,28 @@
     [data-play] { border-color: transparent; background: var(--accent); color: #10150f; font-size: 17px; }
     [data-play]:hover { background: #dbff84; }
 
-    input[type="range"] {
-      width: 100%;
-      accent-color: var(--accent);
-      cursor: pointer;
-    }
+    input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer; }
 
     .marker-toggle {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 7px;
       color: var(--muted);
       cursor: pointer;
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 750;
-      letter-spacing: .06em;
+      letter-spacing: .055em;
       text-transform: uppercase;
       white-space: nowrap;
     }
 
-    .marker-toggle input {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      opacity: 0;
-    }
+    .marker-toggle input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 
     .switch-track {
       position: relative;
-      width: 38px;
-      height: 22px;
+      width: 36px;
+      height: 21px;
+      flex: 0 0 36px;
       border: 1px solid var(--line);
       border-radius: 999px;
       background: rgba(255, 255, 255, .1);
@@ -261,8 +220,8 @@
       position: absolute;
       top: 3px;
       left: 3px;
-      width: 14px;
-      height: 14px;
+      width: 13px;
+      height: 13px;
       border-radius: 50%;
       background: var(--ink);
       content: "";
@@ -270,20 +229,20 @@
     }
 
     .marker-toggle input:checked + .switch-track { background: var(--route); }
-    .marker-toggle input:checked + .switch-track::after { transform: translateX(16px); }
+    .marker-toggle input:checked + .switch-track::after { transform: translateX(15px); }
     .marker-toggle input:focus-visible + .switch-track { outline: 2px solid var(--accent); outline-offset: 2px; }
 
     .import-button {
       display: inline-grid;
       height: 42px;
-      padding: 0 14px;
+      padding: 0 12px;
       place-items: center;
       border: 1px solid var(--line);
       border-radius: 12px;
       background: rgba(255, 255, 255, .07);
       color: var(--ink);
       cursor: pointer;
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 750;
       white-space: nowrap;
     }
@@ -294,9 +253,8 @@
 
     .marker-label {
       display: grid;
-      width: 28px !important;
-      height: 28px !important;
-      margin: -14px 0 0 -14px !important;
+      width: 28px;
+      height: 28px;
       place-items: center;
       border: 2px solid rgba(255, 255, 255, .9);
       border-radius: 50%;
@@ -308,11 +266,7 @@
     }
 
     .marker-label.end { background: #f2f4ef; color: #10150f; }
-
-    .km-marker {
-      border: 0;
-      background: transparent;
-    }
+    .km-marker { transition: opacity .25s; }
 
     .km-marker span {
       position: relative;
@@ -345,15 +299,13 @@
       to { opacity: 1; transform: scale(1) translateY(0); }
     }
 
-    .leaflet-control-attribution {
-      border-radius: 8px 0 0;
-      background: rgba(255, 255, 255, .8) !important;
-      font-size: 10px;
-    }
+    .maplibregl-ctrl-top-right { top: max(12px, env(safe-area-inset-top)); right: max(10px, env(safe-area-inset-right)); }
+    .maplibregl-ctrl-group { overflow: hidden; border-radius: 12px; }
+    .maplibregl-ctrl-attrib { border-radius: 8px 0 0; font-size: 10px; }
 
     .empty-state {
       position: fixed;
-      z-index: 450;
+      z-index: 3;
       inset: 50% auto auto 50%;
       width: min(420px, calc(100% - 40px));
       padding: 24px;
@@ -378,11 +330,11 @@
         top: max(12px, env(safe-area-inset-top));
         right: max(58px, calc(env(safe-area-inset-right) + 46px));
         left: max(12px, env(safe-area-inset-left));
-        width: fit-content;
         max-width: calc(100% - 82px);
         padding: 11px 12px;
       }
-      h1 { overflow: hidden; font-size: 24px; text-overflow: ellipsis; white-space: nowrap; }
+
+      h1 { font-size: 24px; }
       .summary { display: none; }
       .control-panel {
         right: max(10px, env(safe-area-inset-right));
@@ -391,6 +343,7 @@
         padding: 13px 10px;
         border-radius: 17px;
       }
+
       .control-panel.collapsed { max-width: none; }
       .stats { grid-template-columns: repeat(2, 1fr); row-gap: 12px; }
       .stat:nth-child(3) { border-left: 0; }
@@ -398,19 +351,29 @@
       .secondary-controls {
         grid-column: 1 / -1;
         display: grid;
-        grid-template-columns: max-content minmax(140px, 180px);
-        justify-content: space-between;
+        grid-template-columns: minmax(0, 1fr) 96px;
         gap: 10px;
         margin-top: 6px;
       }
-      .secondary-controls .marker-toggle { min-width: 0; margin-left: 4px; }
-      .secondary-controls .import-button { width: 100%; height: 38px; padding: 0 10px; }
+
+      .toggle-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 5px; }
+      .marker-toggle { min-width: 0; font-size: 9px; }
+      .secondary-controls .import-button { width: 96px; height: 38px; padding: 0 7px; }
       .empty-state { top: 46%; width: calc(100% - 32px); }
+    }
+
+    @media (max-width: 390px) {
+      .secondary-controls { grid-template-columns: 1fr; }
+      .secondary-controls .import-button { width: 100%; }
     }
 
     @media (max-height: 700px) and (max-width: 580px) {
       .empty-state { top: 42%; }
       .control-panel:not(.collapsed) .stats { display: none; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
     }
   </style>
 </head>
@@ -419,11 +382,9 @@
   <div class="shade"></div>
 
   <header class="topbar">
-    <div>
-      <p class="eyebrow">Route replay</p>
-      <h1 id="title">GPX Route Replay</h1>
-      <p class="summary" id="summary">Choose a GPX file to begin</p>
-    </div>
+    <p class="eyebrow">Route replay</p>
+    <h1 id="title">GPX Route Replay</h1>
+    <p class="summary" id="summary">Choose a GPX file to begin</p>
   </header>
 
   <section class="empty-state" id="empty-state">
@@ -451,7 +412,7 @@
         <input id="progress" type="range" min="0" max="1000" value="0" aria-label="Route progress">
         <button id="speed" type="button" aria-label="Playback speed">1×</button>
         <div class="secondary-controls">
-          <div class="marker-switches">
+          <div class="toggle-grid">
             <label class="marker-toggle">
               <input id="marker-toggle" type="checkbox" checked>
               <span class="switch-track" aria-hidden="true"></span>
@@ -461,6 +422,16 @@
               <input id="endpoint-toggle" type="checkbox" checked>
               <span class="switch-track" aria-hidden="true"></span>
               Start / finish
+            </label>
+            <label class="marker-toggle">
+              <input id="view-3d-toggle" type="checkbox">
+              <span class="switch-track" aria-hidden="true"></span>
+              3D terrain
+            </label>
+            <label class="marker-toggle">
+              <input id="follow-toggle" type="checkbox">
+              <span class="switch-track" aria-hidden="true"></span>
+              Follow
             </label>
           </div>
           <label class="import-button">
@@ -481,8 +452,7 @@
   </main>
   <p class="status" id="status" aria-live="polite"></p>
 
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="https://unpkg.com/maplibre-gl@5.19.0/dist/maplibre-gl.js"></script>
   <script>
     const $ = (selector) => document.querySelector(selector);
     const ui = {
@@ -490,32 +460,56 @@
       elapsed: $('#elapsed'), elevation: $('#elevation'), heartRate: $('#heart-rate'),
       compactDistance: $('#compact-distance'), playButtons: [...document.querySelectorAll('[data-play]')],
       restart: $('#restart'), progress: $('#progress'), speed: $('#speed'),
-      markerToggle: $('#marker-toggle'), endpointToggle: $('#endpoint-toggle'), dashboard: $('#dashboard'),
-      emptyState: $('#empty-state'), status: $('#status'),
+      markerToggle: $('#marker-toggle'), endpointToggle: $('#endpoint-toggle'),
+      view3dToggle: $('#view-3d-toggle'), followToggle: $('#follow-toggle'),
+      dashboard: $('#dashboard'), emptyState: $('#empty-state'), status: $('#status'),
       fileInputs: [...document.querySelectorAll('.gpx-input')]
     };
 
-    const map = L.map('map', { zoomControl: false, preferCanvas: true });
-    L.control.zoom({ position: 'topright' }).addTo(map);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-    }).addTo(map);
-    map.setView([22.3193, 114.1694], 12);
-    const routeLayers = L.layerGroup().addTo(map);
+    const mapTilerKey = '__MAPTILER_KEY__';
+    const hasMapTilerKey = mapTilerKey && !mapTilerKey.startsWith('__');
+    const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const emptyFeatureCollection = () => ({ type: 'FeatureCollection', features: [] });
+    const mapStyle = hasMapTilerKey
+      ? 'https://api.maptiler.com/maps/streets-v2/style.json'
+      : 'https://tiles.openfreemap.org/styles/bright';
 
+    const map = new maplibregl.Map({
+      container: 'map',
+      style: mapStyle,
+      center: [114.1694, 22.3193],
+      zoom: 12,
+      pitch: 0,
+      maxPitch: 65,
+      attributionControl: true,
+      canvasContextAttributes: { antialias: true },
+      transformRequest(url) {
+        if (!hasMapTilerKey) return { url };
+        const requestUrl = new URL(url);
+        if (requestUrl.hostname === 'api.maptiler.com' && !requestUrl.searchParams.has('key')) {
+          requestUrl.searchParams.set('key', mapTilerKey);
+        }
+        return { url: requestUrl.toString() };
+      }
+    });
+
+    map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
+
+    let mapReady = false;
     let points = [];
+    let displayPoints = [];
     let cumulativeDistance = [];
     let totalDistance = 0;
     let totalDuration = 0;
-    let completedRoute;
-    let runner;
     let mileageMarkers = [];
     let endpointMarkers = [];
     let playing = false;
     let progress = 0;
     let lastFrame = 0;
+    let lastCameraUpdate = 0;
+    let followBearing = 0;
     let speed = 1;
+    let view3dEnabled = false;
     const replayDuration = 50;
     const routeStore = { database: 'gpx-route-replay', store: 'routes', key: 'current' };
 
@@ -527,6 +521,7 @@
       .replace(/\s+/g, ' ')
       .trim()
       .replace(/\b\w/g, (letter) => letter.toUpperCase()) || 'GPX Route';
+
     const haversine = (a, b) => {
       const toRad = Math.PI / 180;
       const dLat = (b.lat - a.lat) * toRad;
@@ -536,12 +531,169 @@
       return 12742000 * Math.asin(Math.sqrt(x));
     };
 
+    const samplePoints = (list, maximum) => {
+      if (list.length <= maximum) return [...list];
+      return Array.from({ length: maximum }, (_, index) =>
+        list[Math.round(index * (list.length - 1) / (maximum - 1))]
+      );
+    };
+
+    const smoothElevations = (list) => list.map((point, index) => {
+      const nearby = list.slice(Math.max(0, index - 2), index + 3)
+        .map((item) => item.ele)
+        .filter(Number.isFinite);
+      return nearby.length ? nearby.reduce((sum, value) => sum + value, 0) / nearby.length : 0;
+    });
+
+    const bearingBetween = (a, b) => {
+      const toRad = Math.PI / 180;
+      const toDeg = 180 / Math.PI;
+      const lon = (b.lon - a.lon) * toRad;
+      const lat1 = a.lat * toRad;
+      const lat2 = b.lat * toRad;
+      return Math.atan2(
+        Math.sin(lon) * Math.cos(lat2),
+        Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(lon)
+      ) * toDeg;
+    };
+
+    const blendBearing = (current, target, amount) => {
+      const delta = ((target - current + 540) % 360) - 180;
+      return current + delta * amount;
+    };
+
     console.assert(
       clamp(2, 0, 1) === 1 &&
       formatTime(65) === '1:05' &&
-      cleanFileName('sample_route.gpx') === 'Sample Route',
-      'Playback helpers failed'
+      cleanFileName('sample_route.gpx') === 'Sample Route' &&
+      samplePoints([0, 1, 2, 3, 4], 3).join() === '0,2,4' &&
+      Math.abs(blendBearing(170, -170, .5) - 180) < .001,
+      'Route helpers failed'
     );
+
+    function lineFeature(list) {
+      if (list.length < 2) return emptyFeatureCollection();
+      return {
+        type: 'Feature',
+        properties: {},
+        geometry: { type: 'LineString', coordinates: list.map((point) => [point.lon, point.lat]) }
+      };
+    }
+
+    function routeRibbon(list) {
+      const ribbonPoints = samplePoints(list, 500);
+      const elevations = smoothElevations(ribbonPoints);
+      const minimum = Math.min(...elevations);
+      const finalIndex = Math.max(1, points.at(-1)?.index || 1);
+      const features = [];
+
+      for (let index = 0; index < ribbonPoints.length - 1; index++) {
+        const a = ribbonPoints[index];
+        const b = ribbonPoints[index + 1];
+        const latitude = (a.lat + b.lat) / 2 * Math.PI / 180;
+        const x = (b.lon - a.lon) * 111320 * Math.cos(latitude);
+        const y = (b.lat - a.lat) * 111320;
+        const length = Math.hypot(x, y);
+        if (!length) continue;
+        const halfWidth = 2.5;
+        const offsetX = -y / length * halfWidth;
+        const offsetY = x / length * halfWidth;
+        const lonOffset = offsetX / (111320 * Math.cos(latitude));
+        const latOffset = offsetY / 111320;
+        const base = 3 + clamp(((elevations[index] + elevations[index + 1]) / 2 - minimum) * 3, 0, 240);
+
+        features.push({
+          type: 'Feature',
+          properties: { base, height: base + 2.4, progress: b.index / finalIndex },
+          geometry: {
+            type: 'Polygon',
+            coordinates: [[
+              [a.lon + lonOffset, a.lat + latOffset],
+              [a.lon - lonOffset, a.lat - latOffset],
+              [b.lon - lonOffset, b.lat - latOffset],
+              [b.lon + lonOffset, b.lat + latOffset],
+              [a.lon + lonOffset, a.lat + latOffset]
+            ]]
+          }
+        });
+      }
+      return { type: 'FeatureCollection', features };
+    }
+
+    function addMapLayers() {
+      map.addSource('terrain-dem', hasMapTilerKey ? {
+        type: 'raster-dem',
+        url: 'https://api.maptiler.com/tiles/terrain-rgb-v2/tiles.json',
+        tileSize: 256,
+        encoding: 'mapbox'
+      } : {
+        type: 'raster-dem',
+        tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+        tileSize: 256,
+        maxzoom: 15,
+        encoding: 'terrarium'
+      });
+      map.addSource('route-full', { type: 'geojson', data: emptyFeatureCollection(), tolerance: .8 });
+      map.addSource('route-complete', { type: 'geojson', data: emptyFeatureCollection(), tolerance: .8 });
+      map.addSource('route-ribbon', { type: 'geojson', data: emptyFeatureCollection(), tolerance: 1.2 });
+      map.addSource('runner', { type: 'geojson', data: emptyFeatureCollection() });
+
+      const firstLabel = map.getStyle().layers.find((layer) => layer.type === 'symbol' && layer.layout?.['text-field'])?.id;
+      const vectorSource = Object.entries(map.getStyle().sources).find(([, source]) => source.type === 'vector')?.[0];
+      if (vectorSource) {
+        map.addLayer({
+          id: '3d-buildings',
+          type: 'fill-extrusion',
+          source: vectorSource,
+          'source-layer': 'building',
+          minzoom: 14.2,
+          layout: { visibility: 'none' },
+          paint: {
+            'fill-extrusion-color': '#d5d8d2',
+            'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 8],
+            'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
+            'fill-extrusion-opacity': .72,
+            'fill-extrusion-vertical-gradient': true
+          }
+        }, firstLabel);
+      }
+
+      map.addLayer({ id: 'route-shadow', type: 'line', source: 'route-full', paint: {
+        'line-color': '#5b0812', 'line-width': 11, 'line-opacity': .25, 'line-blur': 2
+      }});
+      map.addLayer({ id: 'route-base', type: 'line', source: 'route-full', paint: {
+        'line-color': '#f0a3a9', 'line-width': 5, 'line-opacity': .9
+      }, layout: { 'line-cap': 'round', 'line-join': 'round' }});
+      map.addLayer({ id: 'route-complete', type: 'line', source: 'route-complete', paint: {
+        'line-color': '#e21d2f', 'line-width': 7, 'line-opacity': 1
+      }, layout: { 'line-cap': 'round', 'line-join': 'round' }});
+      map.addLayer({ id: 'route-ribbon-all', type: 'fill-extrusion', source: 'route-ribbon', layout: { visibility: 'none' }, paint: {
+        'fill-extrusion-color': '#f0a3a9',
+        'fill-extrusion-base': ['get', 'base'],
+        'fill-extrusion-height': ['get', 'height'],
+        'fill-extrusion-opacity': .32
+      }});
+      map.addLayer({ id: 'route-ribbon-complete', type: 'fill-extrusion', source: 'route-ribbon', layout: { visibility: 'none' }, filter: ['<=', ['get', 'progress'], 0], paint: {
+        'fill-extrusion-color': '#e21d2f',
+        'fill-extrusion-base': ['get', 'base'],
+        'fill-extrusion-height': ['get', 'height'],
+        'fill-extrusion-opacity': .96
+      }});
+      map.addLayer({ id: 'runner-shadow', type: 'circle', source: 'runner', paint: {
+        'circle-radius': 12, 'circle-color': '#10150f', 'circle-opacity': .34, 'circle-blur': .35
+      }});
+      map.addLayer({ id: 'runner-dot', type: 'circle', source: 'runner', paint: {
+        'circle-radius': 8, 'circle-color': '#c9ff45', 'circle-stroke-width': 3, 'circle-stroke-color': '#10150f'
+      }});
+    }
+
+    const mapLoaded = new Promise((resolve) => {
+      map.once('style.load', () => {
+        addMapLayers();
+        mapReady = true;
+        resolve();
+      });
+    });
 
     function openRouteDatabase() {
       return new Promise((resolve, reject) => {
@@ -577,7 +729,7 @@
     function setDashboardCollapsed(collapsed) {
       ui.dashboard.classList.toggle('collapsed', collapsed);
       try { localStorage.setItem('dashboard-collapsed', String(collapsed)); } catch {}
-      setTimeout(() => map.invalidateSize(), 220);
+      setTimeout(() => map.resize(), 220);
     }
 
     function setPlayState(nextPlaying) {
@@ -588,8 +740,24 @@
       }
     }
 
-    function setStatus(message) {
-      ui.status.textContent = message;
+    function setStatus(message) { ui.status.textContent = message; }
+
+    function setViewMode(enabled, animate = true) {
+      view3dEnabled = enabled;
+      ui.view3dToggle.checked = enabled;
+      try { localStorage.setItem('3d-enabled', String(enabled)); } catch {}
+      if (!mapReady) return;
+
+      map.setTerrain(enabled ? { source: 'terrain-dem', exaggeration: 1 } : null);
+      for (const id of ['route-ribbon-all', 'route-ribbon-complete']) {
+        map.setLayoutProperty(id, 'visibility', enabled ? 'visible' : 'none');
+      }
+      if (map.getLayer('3d-buildings')) map.setLayoutProperty('3d-buildings', 'visibility', enabled ? 'visible' : 'none');
+
+      const camera = { pitch: enabled ? 58 : 0, bearing: enabled ? -18 : 0 };
+      if (!animate || reducedMotion) map.jumpTo(camera);
+      else map.easeTo({ ...camera, duration: 700, essential: false });
+      setStatus(enabled ? '3D terrain enabled.' : '2D map enabled.');
     }
 
     function parseGpx(xmlText) {
@@ -616,31 +784,42 @@
       return { points: trackPoints };
     }
 
-    function setup(track, fileName) {
+    function makeMarker(label, point, className = '') {
+      const element = document.createElement('div');
+      element.className = `marker-label ${className}`;
+      element.textContent = label;
+      return new maplibregl.Marker({ element, anchor: 'center' }).setLngLat([point.lon, point.lat]);
+    }
+
+    async function setup(track, fileName) {
       setPlayState(false);
       progress = 0;
       lastFrame = 0;
-      for (const milestone of mileageMarkers) milestone.marker.remove();
-      routeLayers.clearLayers();
+      mileageMarkers.forEach(({ marker }) => marker.remove());
+      endpointMarkers.forEach((marker) => marker.remove());
+      mileageMarkers = [];
       endpointMarkers = [];
       points = track.points;
+      displayPoints = samplePoints(points, 1500);
       ui.title.textContent = cleanFileName(fileName);
       document.title = `${ui.title.textContent} — Route Replay`;
       totalDuration = Math.max(1, (points.at(-1).time - points[0].time) / 1000);
       cumulativeDistance = [0];
-      for (let i = 1; i < points.length; i++) {
-        cumulativeDistance[i] = cumulativeDistance[i - 1] + haversine(points[i - 1], points[i]);
+      for (let index = 1; index < points.length; index++) {
+        cumulativeDistance[index] = cumulativeDistance[index - 1] + haversine(points[index - 1], points[index]);
       }
       totalDistance = cumulativeDistance.at(-1);
+      await mapLoaded;
 
-      const latLngs = points.map((point) => [point.lat, point.lon]);
-      L.polyline(latLngs, { color: '#f5a3a0', opacity: .85, weight: 5, lineCap: 'round' }).addTo(routeLayers);
-      completedRoute = L.polyline([latLngs[0]], { color: '#e21d2f', opacity: 1, weight: 6, lineCap: 'round' }).addTo(routeLayers);
-      runner = L.circleMarker(latLngs[0], {
-        radius: 8, color: '#10150f', weight: 3, fillColor: '#c9ff45', fillOpacity: 1
-      }).addTo(routeLayers);
+      const ribbonData = routeRibbon(displayPoints);
+      console.assert(
+        ribbonData.features.length > 0 &&
+        ribbonData.features.every((feature) => feature.properties.height > feature.properties.base),
+        '3D route ribbon setup failed'
+      );
+      map.getSource('route-full').setData(lineFeature(displayPoints));
+      map.getSource('route-ribbon').setData(ribbonData);
 
-      mileageMarkers = [];
       for (let km = 1; km * 1000 <= totalDistance; km++) {
         const distance = km * 1000;
         const index = cumulativeDistance.findIndex((value) => value >= distance);
@@ -648,32 +827,29 @@
         const mix = (distance - previousDistance) / (cumulativeDistance[index] - previousDistance);
         const a = points[index - 1];
         const b = points[index];
+        const element = document.createElement('div');
+        element.className = 'km-marker';
+        const label = document.createElement('span');
+        label.textContent = `${km} km`;
+        element.append(label);
         mileageMarkers.push({
           distance,
-          marker: L.marker(
-            [a.lat + (b.lat - a.lat) * mix, a.lon + (b.lon - a.lon) * mix],
-            {
-              icon: L.divIcon({
-                className: 'km-marker',
-                html: `<span>${km} km</span>`,
-                iconSize: [42, 38],
-                iconAnchor: [21, 38]
-              }),
-              interactive: false
-            }
-          )
+          marker: new maplibregl.Marker({ element, anchor: 'bottom' })
+            .setLngLat([a.lon + (b.lon - a.lon) * mix, a.lat + (b.lat - a.lat) * mix])
         });
       }
       console.assert(mileageMarkers.length === Math.floor(totalDistance / 1000), 'Mileage marker setup failed');
 
-      const marker = (label, point, className = '') => L.marker([point.lat, point.lon], {
-        icon: L.divIcon({ className: `marker-label ${className}`, html: label, iconSize: [28, 28] }),
-        interactive: false
-      });
-      endpointMarkers = [marker('S', points[0]), marker('F', points.at(-1), 'end')];
+      endpointMarkers = [makeMarker('S', points[0]), makeMarker('F', points.at(-1), 'end')];
       updateEndpointMarkers();
 
-      map.fitBounds(L.latLngBounds(latLngs), { padding: [48, 48] });
+      const bounds = new maplibregl.LngLatBounds();
+      displayPoints.forEach((point) => bounds.extend([point.lon, point.lat]));
+      map.fitBounds(bounds, {
+        padding: { top: 110, right: 55, bottom: ui.dashboard.classList.contains('collapsed') ? 100 : 260, left: 55 },
+        duration: reducedMotion ? 0 : 800
+      });
+      setViewMode(view3dEnabled, false);
       ui.summary.textContent = `${(totalDistance / 1000).toFixed(2)} km · ${formatTime(totalDuration)} · ${points.length} track points`;
       ui.emptyState.hidden = true;
       setStatus(`${ui.title.textContent} loaded from this device.`);
@@ -683,15 +859,17 @@
     function updateMileageMarkers(distance) {
       for (const milestone of mileageMarkers) {
         const visible = ui.markerToggle.checked && milestone.distance <= distance;
-        if (visible && !map.hasLayer(milestone.marker)) milestone.marker.addTo(map);
-        if (!visible && map.hasLayer(milestone.marker)) milestone.marker.remove();
+        if (visible && !milestone.marker.getElement().isConnected) milestone.marker.addTo(map);
+        if (!visible && milestone.marker.getElement().isConnected) milestone.marker.remove();
+        milestone.marker.getElement().style.opacity = distance - milestone.distance > 1500 ? '.45' : '1';
       }
     }
 
     function updateEndpointMarkers() {
       for (const marker of endpointMarkers) {
-        if (ui.endpointToggle.checked && !routeLayers.hasLayer(marker)) routeLayers.addLayer(marker);
-        if (!ui.endpointToggle.checked && routeLayers.hasLayer(marker)) routeLayers.removeLayer(marker);
+        const visible = marker.getElement().isConnected;
+        if (ui.endpointToggle.checked && !visible) marker.addTo(map);
+        if (!ui.endpointToggle.checked && visible) marker.remove();
       }
     }
 
@@ -700,39 +878,57 @@
       let low = 0;
       let high = points.length - 1;
       while (low < high) {
-        const mid = Math.ceil((low + high) / 2);
-        if (points[mid].time <= targetTime) low = mid;
-        else high = mid - 1;
+        const middle = Math.ceil((low + high) / 2);
+        if (points[middle].time <= targetTime) low = middle;
+        else high = middle - 1;
       }
       const index = Math.min(low, points.length - 2);
       const a = points[index];
       const b = points[index + 1];
       const mix = clamp((targetTime - a.time) / Math.max(1, b.time - a.time), 0, 1);
-      return {
+      const current = {
         index,
         lat: a.lat + (b.lat - a.lat) * mix,
         lon: a.lon + (b.lon - a.lon) * mix,
         ele: a.ele + (b.ele - a.ele) * mix,
-        hr: Math.round(a.hr + (b.hr - a.hr) * mix),
-        distance: cumulativeDistance[index] + haversine(a, { lat: a.lat + (b.lat - a.lat) * mix, lon: a.lon + (b.lon - a.lon) * mix })
+        hr: Math.round(a.hr + (b.hr - a.hr) * mix)
       };
+      current.distance = cumulativeDistance[index] + haversine(a, current);
+      current.bearing = bearingBetween(a, b);
+      return current;
+    }
+
+    function updateFollowCamera(current, timestamp = performance.now()) {
+      if (!ui.followToggle.checked || timestamp - lastCameraUpdate < 220) return;
+      followBearing = blendBearing(followBearing, current.bearing, .28);
+      const camera = {
+        center: [current.lon, current.lat],
+        bearing: view3dEnabled ? followBearing : 0,
+        pitch: view3dEnabled ? 58 : 0,
+        zoom: Math.max(map.getZoom(), view3dEnabled ? 15.3 : 14.5)
+      };
+      if (reducedMotion) map.jumpTo(camera);
+      else map.easeTo({ ...camera, duration: 360, essential: false });
+      lastCameraUpdate = timestamp;
     }
 
     function render(nextProgress) {
       progress = clamp(nextProgress, 0, 1);
       const current = pointAt(progress);
-      const latLng = [current.lat, current.lon];
-      completedRoute.setLatLngs([
-        ...points.slice(0, current.index + 1).map((point) => [point.lat, point.lon]),
-        latLng
-      ]);
-      runner.setLatLng(latLng);
+      const completed = displayPoints.filter((point) => point.index <= current.index);
+      completed.push(current);
+      map.getSource('route-complete').setData(lineFeature(completed));
+      map.getSource('runner').setData({
+        type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [current.lon, current.lat] }
+      });
+      map.setFilter('route-ribbon-complete', ['<=', ['get', 'progress'], progress]);
       ui.progress.value = Math.round(progress * 1000);
       ui.distance.textContent = ui.compactDistance.textContent = `${(current.distance / 1000).toFixed(2)} km`;
       ui.elapsed.textContent = formatTime(progress * totalDuration);
       ui.elevation.textContent = Number.isFinite(current.ele) ? `${Math.round(current.ele)} m` : '—';
       ui.heartRate.textContent = Number.isFinite(current.hr) ? `${current.hr} bpm` : '—';
       updateMileageMarkers(current.distance);
+      updateFollowCamera(current);
     }
 
     function frame(timestamp) {
@@ -775,14 +971,32 @@
       if (points.length) updateMileageMarkers(pointAt(progress).distance);
     });
     ui.endpointToggle.addEventListener('change', updateEndpointMarkers);
+    ui.view3dToggle.addEventListener('change', () => setViewMode(ui.view3dToggle.checked));
+    ui.followToggle.addEventListener('change', () => {
+      if (ui.followToggle.checked && points.length) {
+        followBearing = pointAt(progress).bearing;
+        lastCameraUpdate = 0;
+        updateFollowCamera(pointAt(progress));
+      }
+      setStatus(ui.followToggle.checked ? 'Follow camera enabled.' : 'Follow camera disabled.');
+    });
     $('#dashboard-collapse').addEventListener('click', () => setDashboardCollapsed(true));
     $('#dashboard-expand').addEventListener('click', () => setDashboardCollapsed(false));
+
+    for (const eventName of ['dragstart', 'rotatestart', 'pitchstart']) {
+      map.on(eventName, (event) => {
+        if (event.originalEvent && ui.followToggle.checked) {
+          ui.followToggle.checked = false;
+          setStatus('Follow camera paused for manual map movement.');
+        }
+      });
+    }
 
     async function importGpx(file) {
       if (!file) return;
       try {
         const xmlText = await file.text();
-        setup(parseGpx(xmlText), file.name);
+        await setup(parseGpx(xmlText), file.name);
         try {
           await saveRoute(file.name, xmlText);
           setStatus(`${cleanFileName(file.name)} loaded and saved on this device.`);
@@ -803,19 +1017,21 @@
       });
     }
 
-    const savedDashboardState = (() => {
-      try { return localStorage.getItem('dashboard-collapsed'); } catch { return null; }
-    })();
+    const readPreference = (key) => {
+      try { return localStorage.getItem(key); } catch { return null; }
+    };
+    const savedDashboardState = readPreference('dashboard-collapsed');
     setDashboardCollapsed(
       savedDashboardState === null
         ? matchMedia('(max-width: 580px)').matches
         : savedDashboardState === 'true'
     );
+    view3dEnabled = readPreference('3d-enabled') === 'true';
+    ui.view3dToggle.checked = view3dEnabled;
 
+    mapLoaded.then(() => setViewMode(view3dEnabled, false));
     readSavedRoute()
-      .then((saved) => {
-        if (saved) setup(parseGpx(saved.xmlText), saved.fileName);
-      })
+      .then((saved) => saved && setup(parseGpx(saved.xmlText), saved.fileName))
       .catch(() => setStatus('Choose a GPX file to begin.'));
   </script>
 </body>

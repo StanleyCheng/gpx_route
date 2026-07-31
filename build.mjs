@@ -7,7 +7,7 @@ const html = ${JSON.stringify(html)};
 const socialImage = Uint8Array.from(atob(${JSON.stringify(socialImage)}), character => character.charCodeAt(0));
 
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname === '/og.png') {
       return new Response(socialImage, {
@@ -15,7 +15,11 @@ export default {
       });
     }
     if (url.pathname === '/' || url.pathname === '/index.html') {
-      return new Response(html.replaceAll('__SITE_ORIGIN__', url.origin), {
+      return new Response(
+        html
+          .replaceAll('__SITE_ORIGIN__', url.origin)
+          .replaceAll('__MAPTILER_KEY__', encodeURIComponent(env.MAPTILER_KEY || '')),
+        {
         headers: {
           'content-type': 'text/html; charset=utf-8',
           'cache-control': 'no-cache',
