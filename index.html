@@ -511,6 +511,7 @@
     let speed = 1;
     let view3dEnabled = false;
     const replayDuration = 50;
+    const playbackSpeeds = [.25, .5, 1, 2, 4];
     const routeStore = { database: 'gpx-route-replay', store: 'routes', key: 'current' };
 
     const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -567,6 +568,7 @@
       formatTime(65) === '1:05' &&
       cleanFileName('sample_route.gpx') === 'Sample Route' &&
       samplePoints([0, 1, 2, 3, 4], 3).join() === '0,2,4' &&
+      playbackSpeeds.join() === '0.25,0.5,1,2,4' &&
       Math.abs(blendBearing(170, -170, .5) - 180) < .001,
       'Route helpers failed'
     );
@@ -751,6 +753,9 @@
       map.setTerrain(enabled ? { source: 'terrain-dem', exaggeration: 1 } : null);
       for (const id of ['route-ribbon-all', 'route-ribbon-complete']) {
         map.setLayoutProperty(id, 'visibility', enabled ? 'visible' : 'none');
+      }
+      for (const id of ['route-shadow', 'route-base', 'route-complete']) {
+        map.setLayoutProperty(id, 'visibility', enabled ? 'none' : 'visible');
       }
       if (map.getLayer('3d-buildings')) map.setLayoutProperty('3d-buildings', 'visibility', enabled ? 'visible' : 'none');
 
@@ -964,8 +969,9 @@
       if (points.length) render(Number(event.target.value) / 1000);
     });
     ui.speed.addEventListener('click', () => {
-      speed = speed === 1 ? 2 : speed === 2 ? 4 : 1;
+      speed = playbackSpeeds[(playbackSpeeds.indexOf(speed) + 1) % playbackSpeeds.length];
       ui.speed.textContent = `${speed}×`;
+      ui.speed.setAttribute('aria-label', `Playback speed, ${speed} times`);
     });
     ui.markerToggle.addEventListener('change', () => {
       if (points.length) updateMileageMarkers(pointAt(progress).distance);
