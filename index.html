@@ -36,6 +36,8 @@
     }
 
     #map { position: fixed; inset: 0; background: #d9dedb; }
+    .route-overlay { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; pointer-events: none; }
+    .maplibregl-marker { z-index: 2; }
 
     .shade {
       position: fixed;
@@ -503,6 +505,9 @@
     });
 
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
+    const routeOverlay = document.createElement('canvas');
+    routeOverlay.className = 'route-overlay';
+    map.getContainer().append(routeOverlay);
 
     let mapReady = false;
     let points = [];
@@ -518,6 +523,7 @@
     let lastCameraUpdate = 0;
     let followBearing = 0;
     let speed = 1;
+    let overlayCompleted = [];
     let view3dEnabled = false;
     const replayDuration = 50;
     const routeStore = { database: 'gpx-route-replay', store: 'routes', key: 'current' };
@@ -581,6 +587,43 @@
         properties: {},
         geometry: { type: 'LineString', coordinates: list.map((point) => [point.lon, point.lat]) }
       };
+    }
+
+    function drawRouteOverlay() {
+      const width = routeOverlay.clientWidth;
+      const height = routeOverlay.clientHeight;
+      const scale = devicePixelRatio || 1;
+      if (routeOverlay.width !== Math.round(width * scale) || routeOverlay.height !== Math.round(height * scale)) {
+        routeOverlay.width = Math.round(width * scale);
+        routeOverlay.height = Math.round(height * scale);
+      }
+      const context = routeOverlay.getContext('2d');
+      context.setTransform(scale, 0, 0, scale, 0, 0);
+      context.clearRect(0, 0, width, height);
+      if (!view3dEnabled || displayPoints.length < 2) return;
+
+      const trace = (list) => {
+        context.beginPath();
+        list.forEach((point, index) => {
+          const projected = map.project([point.lon, point.lat]);
+          context[index ? 'lineTo' : 'moveTo'](projected.x, projected.y);
+        });
+        context.stroke();
+      };
+      context.lineCap = 'round';
+      context.lineJoin = 'round';
+      context.strokeStyle = '#f0a3a9';
+      context.lineWidth = 5;
+      trace(displayPoints);
+      context.strokeStyle = 'rgba(226, 29, 47, .5)';
+      context.lineWidth = 15;
+      context.shadowColor = '#e21d2f';
+      context.shadowBlur = 8;
+      trace(overlayCompleted);
+      context.shadowBlur = 0;
+      context.strokeStyle = '#e21d2f';
+      context.lineWidth = 7;
+      trace(overlayCompleted);
     }
 
     function addMapLayers() {
@@ -698,6 +741,10 @@
       if (!mapReady) return;
 
       if (map.getLayer('3d-buildings')) map.setLayoutProperty('3d-buildings', 'visibility', enabled ? 'visible' : 'none');
+      for (const id of ['route-shadow', 'route-base', 'route-complete']) {
+        map.setLayoutProperty(id, 'visibility', enabled ? 'none' : 'visible');
+      }
+      drawRouteOverlay();
 
       const camera = { pitch: enabled ? 50 : 0, bearing: enabled ? -18 : 0 };
       const moveCamera = () => {
@@ -866,7 +913,9 @@
       const current = pointAt(progress);
       const completed = displayPoints.filter((point) => point.index <= current.index);
       completed.push(current);
+      overlayCompleted = completed;
       map.getSource('route-complete').setData(lineFeature(completed));
+      drawRouteOverlay();
       map.getSource('runner').setData({
         type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [current.lon, current.lat] }
       });
@@ -928,6 +977,8 @@
       }
       setStatus(ui.followToggle.checked ? 'Follow camera enabled.' : 'Follow camera disabled.');
     });
+    map.on('move', drawRouteOverlay);
+    map.on('resize', drawRouteOverlay);
     $('#dashboard-collapse').addEventListener('click', () => setDashboardCollapsed(true));
     $('#dashboard-expand').addEventListener('click', () => setDashboardCollapsed(false));
 
