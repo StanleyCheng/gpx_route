@@ -702,8 +702,15 @@
       if (map.getLayer('3d-buildings')) map.setLayoutProperty('3d-buildings', 'visibility', enabled ? 'visible' : 'none');
 
       const camera = { pitch: enabled ? 50 : 0, bearing: enabled ? -18 : 0 };
-      if (!animate || reducedMotion) map.jumpTo(camera);
-      else map.easeTo({ ...camera, duration: 700, essential: false });
+      const moveCamera = () => {
+        if (enabled !== view3dEnabled) return;
+        if (!animate || reducedMotion) map.jumpTo(camera);
+        else map.easeTo({ ...camera, duration: 700, essential: false });
+      };
+      if (enabled) {
+        map.jumpTo({ pitch: 0, bearing: 0 });
+        map.once('idle', moveCamera);
+      } else moveCamera();
       setStatus(enabled ? '3D terrain enabled.' : '2D map enabled.');
     }
 
