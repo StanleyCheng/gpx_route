@@ -709,7 +709,13 @@
       };
       if (enabled) {
         map.jumpTo({ pitch: 0, bearing: 0 });
-        map.once('idle', moveCamera);
+        let terrainChecks = 0;
+        const moveWhenTerrainReady = () => {
+          if (enabled !== view3dEnabled) return;
+          if (Number.isFinite(map.queryTerrainElevation(map.getCenter()))) moveCamera();
+          else if (++terrainChecks < 50) setTimeout(moveWhenTerrainReady, 100);
+        };
+        moveWhenTerrainReady();
       } else moveCamera();
       setStatus(enabled ? '3D terrain enabled.' : '2D map enabled.');
     }
