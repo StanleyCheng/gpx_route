@@ -791,7 +791,7 @@
       const element = document.createElement('div');
       element.className = `marker-label ${className}`;
       element.textContent = label;
-      return new maplibregl.Marker({ element, anchor: 'center' }).setLngLat([point.lon, point.lat]);
+      return new maplibregl.Marker({ element, anchor: 'center', opacityWhenCovered: 1 }).setLngLat([point.lon, point.lat]);
     }
 
     async function setup(track, fileName) {
@@ -830,7 +830,7 @@
         element.append(label);
         mileageMarkers.push({
           distance,
-          marker: new maplibregl.Marker({ element, anchor: 'bottom' })
+          marker: new maplibregl.Marker({ element, anchor: 'bottom', opacityWhenCovered: 1 })
             .setLngLat([a.lon + (b.lon - a.lon) * mix, a.lat + (b.lat - a.lat) * mix])
         });
       }
@@ -857,7 +857,8 @@
         const visible = ui.markerToggle.checked && milestone.distance <= distance;
         if (visible && !milestone.marker.getElement().isConnected) milestone.marker.addTo(map);
         if (!visible && milestone.marker.getElement().isConnected) milestone.marker.remove();
-        milestone.marker.getElement().style.opacity = distance - milestone.distance > 1500 ? '.45' : '1';
+        const opacity = distance - milestone.distance > 1500 ? .45 : 1;
+        milestone.marker.setOpacity(opacity, opacity);
       }
     }
 
