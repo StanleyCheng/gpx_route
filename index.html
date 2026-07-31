@@ -701,7 +701,7 @@
       map.setTerrain(enabled ? { source: 'terrain-dem', exaggeration: 1 } : null);
       if (map.getLayer('3d-buildings')) map.setLayoutProperty('3d-buildings', 'visibility', enabled ? 'visible' : 'none');
 
-      const camera = { pitch: enabled ? 58 : 0, bearing: enabled ? -18 : 0 };
+      const camera = { pitch: enabled ? 50 : 0, bearing: enabled ? -18 : 0 };
       if (!animate || reducedMotion) map.jumpTo(camera);
       else map.easeTo({ ...camera, duration: 700, essential: false });
       setStatus(enabled ? '3D terrain enabled.' : '2D map enabled.');
@@ -844,7 +844,7 @@
       const camera = {
         center: [current.lon, current.lat],
         bearing: view3dEnabled ? followBearing : 0,
-        pitch: view3dEnabled ? 58 : 0,
+        pitch: view3dEnabled ? 50 : 0,
         zoom: Math.max(map.getZoom(), view3dEnabled ? 15.3 : 14.5)
       };
       if (reducedMotion) map.jumpTo(camera);
