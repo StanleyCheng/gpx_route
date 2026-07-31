@@ -707,18 +707,8 @@
       };
       if (enabled) {
         map.jumpTo({ pitch: 0, bearing: 0 });
-        let terrainReadyTimer;
-        const moveWhenTerrainReady = (event) => {
-          if (event.sourceId !== 'terrain-dem' || !event.tile) return;
-          clearTimeout(terrainReadyTimer);
-          terrainReadyTimer = setTimeout(() => {
-            map.off('sourcedata', moveWhenTerrainReady);
-            moveCamera();
-          }, 500);
-        };
-        map.on('sourcedata', moveWhenTerrainReady);
         map.setTerrain({ source: 'terrain-dem', exaggeration: 1 });
-        if (map.isSourceLoaded('terrain-dem')) moveWhenTerrainReady({ sourceId: 'terrain-dem', tile: true });
+        setTimeout(moveCamera, 3000);
       } else {
         map.setTerrain(null);
         moveCamera();
