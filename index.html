@@ -697,7 +697,6 @@
       try { localStorage.setItem('3d-enabled', String(enabled)); } catch {}
       if (!mapReady) return;
 
-      map.setTerrain(enabled ? { source: 'terrain-dem', exaggeration: 1 } : null);
       if (map.getLayer('3d-buildings')) map.setLayoutProperty('3d-buildings', 'visibility', enabled ? 'visible' : 'none');
 
       const camera = { pitch: enabled ? 50 : 0, bearing: enabled ? -18 : 0 };
@@ -708,14 +707,18 @@
       };
       if (enabled) {
         map.jumpTo({ pitch: 0, bearing: 0 });
-        let terrainChecks = 0;
-        const moveWhenTerrainReady = () => {
-          if (enabled !== view3dEnabled) return;
-          if (Number.isFinite(map.queryTerrainElevation(map.getCenter()))) moveCamera();
-          else if (++terrainChecks < 50) setTimeout(moveWhenTerrainReady, 100);
+        const moveWhenTerrainReady = (event) => {
+          if (event.sourceId !== 'terrain-dem' || !event.isSourceLoaded) return;
+          map.off('sourcedata', moveWhenTerrainReady);
+          moveCamera();
         };
-        moveWhenTerrainReady();
-      } else moveCamera();
+        map.on('sourcedata', moveWhenTerrainReady);
+        map.setTerrain({ source: 'terrain-dem', exaggeration: 1 });
+        if (map.isSourceLoaded('terrain-dem')) moveWhenTerrainReady({ sourceId: 'terrain-dem', isSourceLoaded: true });
+      } else {
+        map.setTerrain(null);
+        moveCamera();
+      }
       setStatus(enabled ? '3D terrain enabled.' : '2D map enabled.');
     }
 
