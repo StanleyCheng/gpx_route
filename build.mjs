@@ -2,9 +2,11 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 
 const html = await readFile('index.html', 'utf8');
 const socialImage = (await readFile('public/og.png')).toString('base64');
+const faviconImage = (await readFile('public/favicon.png')).toString('base64');
 const worker = `
 const html = ${JSON.stringify(html)};
 const socialImage = Uint8Array.from(atob(${JSON.stringify(socialImage)}), character => character.charCodeAt(0));
+const faviconImage = Uint8Array.from(atob(${JSON.stringify(faviconImage)}), character => character.charCodeAt(0));
 
 export default {
   async fetch(request, env) {
@@ -12,6 +14,11 @@ export default {
     if (url.pathname === '/og.png') {
       return new Response(socialImage, {
         headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' }
+      });
+    }
+    if (url.pathname === '/favicon.png') {
+      return new Response(faviconImage, {
+        headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=604800' }
       });
     }
     if (url.pathname === '/' || url.pathname === '/index.html') {

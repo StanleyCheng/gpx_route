@@ -9,7 +9,8 @@
   <meta property="og:image" content="__SITE_ORIGIN__/og.png">
   <meta name="twitter:card" content="summary_large_image">
   <title>GPX Route Replay</title>
-  <link rel="icon" href="data:,">
+  <link rel="icon" type="image/png" sizes="192x192" href="/favicon.png?v=1">
+  <link rel="apple-touch-icon" href="/favicon.png?v=1">
   <link rel="preconnect" href="https://api.maptiler.com">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.19.0/dist/maplibre-gl.css">
   <style>
@@ -163,7 +164,7 @@
 
     .transport {
       display: grid;
-      grid-template-columns: 44px 44px minmax(120px, 1fr) 56px auto;
+      grid-template-columns: 44px 44px minmax(120px, 1fr) 72px auto;
       gap: 10px;
       align-items: center;
     }
@@ -171,7 +172,7 @@
     .secondary-controls { display: flex; align-items: center; gap: 14px; }
     .toggle-grid { display: grid; grid-template-columns: repeat(2, max-content); gap: 8px 14px; }
 
-    button {
+    button, select {
       height: 42px;
       border: 1px solid var(--line);
       border-radius: 12px;
@@ -183,10 +184,11 @@
       font-weight: 750;
     }
 
-    button:hover { background: rgba(255, 255, 255, .13); }
-    button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    button:hover, select:hover { background: rgba(255, 255, 255, .13); }
+    button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     [data-play] { border-color: transparent; background: var(--accent); color: #10150f; font-size: 17px; }
     [data-play]:hover { background: #dbff84; }
+    #speed { width: 72px; padding: 0 4px 0 8px; }
 
     input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer; }
 
@@ -347,7 +349,8 @@
       .control-panel.collapsed { max-width: none; }
       .stats { grid-template-columns: repeat(2, 1fr); row-gap: 12px; }
       .stat:nth-child(3) { border-left: 0; }
-      .transport { grid-template-columns: 42px 42px 1fr 50px; gap: 6px; }
+      .transport { grid-template-columns: 42px 42px 1fr 68px; gap: 6px; }
+      #speed { width: 68px; padding-left: 5px; font-size: 12px; }
       .secondary-controls {
         grid-column: 1 / -1;
         display: grid;
@@ -410,7 +413,13 @@
         <button type="button" data-play aria-label="Play route">▶</button>
         <button id="restart" type="button" aria-label="Restart route">↺</button>
         <input id="progress" type="range" min="0" max="1000" value="0" aria-label="Route progress">
-        <button id="speed" type="button" aria-label="Playback speed">1×</button>
+        <select id="speed" aria-label="Playback speed">
+          <option value="0.25">0.25×</option>
+          <option value="0.5">0.5×</option>
+          <option value="1" selected>1×</option>
+          <option value="2">2×</option>
+          <option value="4">4×</option>
+        </select>
         <div class="secondary-controls">
           <div class="toggle-grid">
             <label class="marker-toggle">
@@ -511,7 +520,6 @@
     let speed = 1;
     let view3dEnabled = false;
     const replayDuration = 50;
-    const playbackSpeeds = [.25, .5, 1, 2, 4];
     const routeStore = { database: 'gpx-route-replay', store: 'routes', key: 'current' };
 
     const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -539,13 +547,6 @@
       );
     };
 
-    const smoothElevations = (list) => list.map((point, index) => {
-      const nearby = list.slice(Math.max(0, index - 2), index + 3)
-        .map((item) => item.ele)
-        .filter(Number.isFinite);
-      return nearby.length ? nearby.reduce((sum, value) => sum + value, 0) / nearby.length : 0;
-    });
-
     const bearingBetween = (a, b) => {
       const toRad = Math.PI / 180;
       const toDeg = 180 / Math.PI;
@@ -568,7 +569,7 @@
       formatTime(65) === '1:05' &&
       cleanFileName('sample_route.gpx') === 'Sample Route' &&
       samplePoints([0, 1, 2, 3, 4], 3).join() === '0,2,4' &&
-      playbackSpeeds.join() === '0.25,0.5,1,2,4' &&
+      [...ui.speed.options].map((option) => Number(option.value)).join() === '0.25,0.5,1,2,4' &&
       Math.abs(blendBearing(170, -170, .5) - 180) < .001,
       'Route helpers failed'
     );
@@ -580,46 +581,6 @@
         properties: {},
         geometry: { type: 'LineString', coordinates: list.map((point) => [point.lon, point.lat]) }
       };
-    }
-
-    function routeRibbon(list) {
-      const ribbonPoints = samplePoints(list, 500);
-      const elevations = smoothElevations(ribbonPoints);
-      const minimum = Math.min(...elevations);
-      const finalIndex = Math.max(1, points.at(-1)?.index || 1);
-      const features = [];
-
-      for (let index = 0; index < ribbonPoints.length - 1; index++) {
-        const a = ribbonPoints[index];
-        const b = ribbonPoints[index + 1];
-        const latitude = (a.lat + b.lat) / 2 * Math.PI / 180;
-        const x = (b.lon - a.lon) * 111320 * Math.cos(latitude);
-        const y = (b.lat - a.lat) * 111320;
-        const length = Math.hypot(x, y);
-        if (!length) continue;
-        const halfWidth = 2.5;
-        const offsetX = -y / length * halfWidth;
-        const offsetY = x / length * halfWidth;
-        const lonOffset = offsetX / (111320 * Math.cos(latitude));
-        const latOffset = offsetY / 111320;
-        const base = 3 + clamp(((elevations[index] + elevations[index + 1]) / 2 - minimum) * 3, 0, 240);
-
-        features.push({
-          type: 'Feature',
-          properties: { base, height: base + 2.4, progress: b.index / finalIndex },
-          geometry: {
-            type: 'Polygon',
-            coordinates: [[
-              [a.lon + lonOffset, a.lat + latOffset],
-              [a.lon - lonOffset, a.lat - latOffset],
-              [b.lon - lonOffset, b.lat - latOffset],
-              [b.lon + lonOffset, b.lat + latOffset],
-              [a.lon + lonOffset, a.lat + latOffset]
-            ]]
-          }
-        });
-      }
-      return { type: 'FeatureCollection', features };
     }
 
     function addMapLayers() {
@@ -637,10 +598,9 @@
       });
       map.addSource('route-full', { type: 'geojson', data: emptyFeatureCollection(), tolerance: .8 });
       map.addSource('route-complete', { type: 'geojson', data: emptyFeatureCollection(), tolerance: .8 });
-      map.addSource('route-ribbon', { type: 'geojson', data: emptyFeatureCollection(), tolerance: 1.2 });
       map.addSource('runner', { type: 'geojson', data: emptyFeatureCollection() });
 
-      const firstLabel = map.getStyle().layers.find((layer) => layer.type === 'symbol' && layer.layout?.['text-field'])?.id;
+      const firstSymbol = map.getStyle().layers.find((layer) => layer.type === 'symbol')?.id;
       const vectorSource = Object.entries(map.getStyle().sources).find(([, source]) => source.type === 'vector')?.[0];
       if (vectorSource) {
         map.addLayer({
@@ -657,30 +617,18 @@
             'fill-extrusion-opacity': .72,
             'fill-extrusion-vertical-gradient': true
           }
-        }, firstLabel);
+        }, firstSymbol);
       }
 
-      map.addLayer({ id: 'route-shadow', type: 'line', source: 'route-full', paint: {
-        'line-color': '#5b0812', 'line-width': 11, 'line-opacity': .25, 'line-blur': 2
-      }});
+      map.addLayer({ id: 'route-shadow', type: 'line', source: 'route-complete', paint: {
+        'line-color': '#e21d2f', 'line-width': 15, 'line-opacity': .38, 'line-blur': 4
+      }}, firstSymbol);
       map.addLayer({ id: 'route-base', type: 'line', source: 'route-full', paint: {
         'line-color': '#f0a3a9', 'line-width': 5, 'line-opacity': .9
-      }, layout: { 'line-cap': 'round', 'line-join': 'round' }});
+      }, layout: { 'line-cap': 'round', 'line-join': 'round' }}, firstSymbol);
       map.addLayer({ id: 'route-complete', type: 'line', source: 'route-complete', paint: {
         'line-color': '#e21d2f', 'line-width': 7, 'line-opacity': 1
-      }, layout: { 'line-cap': 'round', 'line-join': 'round' }});
-      map.addLayer({ id: 'route-ribbon-all', type: 'fill-extrusion', source: 'route-ribbon', layout: { visibility: 'none' }, paint: {
-        'fill-extrusion-color': '#f0a3a9',
-        'fill-extrusion-base': ['get', 'base'],
-        'fill-extrusion-height': ['get', 'height'],
-        'fill-extrusion-opacity': .32
-      }});
-      map.addLayer({ id: 'route-ribbon-complete', type: 'fill-extrusion', source: 'route-ribbon', layout: { visibility: 'none' }, filter: ['<=', ['get', 'progress'], 0], paint: {
-        'fill-extrusion-color': '#e21d2f',
-        'fill-extrusion-base': ['get', 'base'],
-        'fill-extrusion-height': ['get', 'height'],
-        'fill-extrusion-opacity': .96
-      }});
+      }, layout: { 'line-cap': 'round', 'line-join': 'round' }}, firstSymbol);
       map.addLayer({ id: 'runner-shadow', type: 'circle', source: 'runner', paint: {
         'circle-radius': 12, 'circle-color': '#10150f', 'circle-opacity': .34, 'circle-blur': .35
       }});
@@ -751,12 +699,6 @@
       if (!mapReady) return;
 
       map.setTerrain(enabled ? { source: 'terrain-dem', exaggeration: 1 } : null);
-      for (const id of ['route-ribbon-all', 'route-ribbon-complete']) {
-        map.setLayoutProperty(id, 'visibility', enabled ? 'visible' : 'none');
-      }
-      for (const id of ['route-shadow', 'route-base', 'route-complete']) {
-        map.setLayoutProperty(id, 'visibility', enabled ? 'none' : 'visible');
-      }
       if (map.getLayer('3d-buildings')) map.setLayoutProperty('3d-buildings', 'visibility', enabled ? 'visible' : 'none');
 
       const camera = { pitch: enabled ? 58 : 0, bearing: enabled ? -18 : 0 };
@@ -816,14 +758,7 @@
       totalDistance = cumulativeDistance.at(-1);
       await mapLoaded;
 
-      const ribbonData = routeRibbon(displayPoints);
-      console.assert(
-        ribbonData.features.length > 0 &&
-        ribbonData.features.every((feature) => feature.properties.height > feature.properties.base),
-        '3D route ribbon setup failed'
-      );
       map.getSource('route-full').setData(lineFeature(displayPoints));
-      map.getSource('route-ribbon').setData(ribbonData);
 
       for (let km = 1; km * 1000 <= totalDistance; km++) {
         const distance = km * 1000;
@@ -926,7 +861,6 @@
       map.getSource('runner').setData({
         type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [current.lon, current.lat] }
       });
-      map.setFilter('route-ribbon-complete', ['<=', ['get', 'progress'], progress]);
       ui.progress.value = Math.round(progress * 1000);
       ui.distance.textContent = ui.compactDistance.textContent = `${(current.distance / 1000).toFixed(2)} km`;
       ui.elapsed.textContent = formatTime(progress * totalDuration);
@@ -968,10 +902,9 @@
     ui.progress.addEventListener('input', (event) => {
       if (points.length) render(Number(event.target.value) / 1000);
     });
-    ui.speed.addEventListener('click', () => {
-      speed = playbackSpeeds[(playbackSpeeds.indexOf(speed) + 1) % playbackSpeeds.length];
-      ui.speed.textContent = `${speed}×`;
-      ui.speed.setAttribute('aria-label', `Playback speed, ${speed} times`);
+    ui.speed.addEventListener('change', () => {
+      speed = Number(ui.speed.value);
+      setStatus(`Playback speed set to ${speed} times.`);
     });
     ui.markerToggle.addEventListener('change', () => {
       if (points.length) updateMileageMarkers(pointAt(progress).distance);
