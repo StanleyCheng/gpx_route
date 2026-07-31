@@ -1,0 +1,784 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111815">
+  <meta property="og:title" content="GPX Route Replay">
+  <meta property="og:description" content="Open a GPX file on your device and replay the route on an animated map.">
+  <meta property="og:image" content="__SITE_ORIGIN__/og.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <title>GPX Route Replay</title>
+  <link rel="icon" href="data:,">
+  <link rel="preconnect" href="https://tile.openstreetmap.org">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #f4f7f5;
+      --muted: #a7b0ab;
+      --panel: rgba(15, 20, 18, .88);
+      --line: rgba(255, 255, 255, .13);
+      --accent: #c9ff45;
+      --route: #e21d2f;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #111815;
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    #map { position: fixed; inset: 0; background: #d9dedb; }
+
+    .shade {
+      position: fixed;
+      inset: 0;
+      z-index: 400;
+      pointer-events: none;
+      background:
+        linear-gradient(180deg, rgba(7, 11, 9, .48), transparent 22%),
+        linear-gradient(0deg, rgba(7, 11, 9, .68), transparent 34%);
+    }
+
+    .topbar {
+      position: fixed;
+      z-index: 500;
+      top: max(22px, env(safe-area-inset-top));
+      left: max(24px, env(safe-area-inset-left));
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      padding: 14px 16px;
+      border: 1px solid rgba(255, 255, 255, .12);
+      border-radius: 16px;
+      background: rgba(15, 20, 18, .3);
+      backdrop-filter: blur(10px);
+      pointer-events: none;
+    }
+
+    .eyebrow {
+      margin: 1px 0 5px;
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(24px, 4vw, 42px);
+      line-height: .95;
+      letter-spacing: -.055em;
+    }
+
+    .summary {
+      margin: 9px 0 0;
+      color: rgba(244, 247, 245, .76);
+      font-size: 13px;
+    }
+
+    .control-panel {
+      position: fixed;
+      z-index: 500;
+      right: max(24px, env(safe-area-inset-right));
+      bottom: max(24px, env(safe-area-inset-bottom));
+      left: max(24px, env(safe-area-inset-left));
+      max-width: 880px;
+      margin: auto;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: var(--panel);
+      box-shadow: 0 16px 48px rgba(0, 0, 0, .28);
+      backdrop-filter: blur(18px);
+      transition: max-width .2s, padding .2s;
+    }
+
+    .dashboard-collapse {
+      position: absolute;
+      top: 8px;
+      right: 9px;
+      width: 34px;
+      height: 30px;
+      border-radius: 9px;
+      color: var(--muted);
+      line-height: 1;
+    }
+
+    .panel-details { transition: opacity .15s; }
+
+    .compact-bar {
+      display: none;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .compact-distance {
+      min-width: 0;
+      margin-right: auto;
+    }
+
+    .compact-distance .label { margin-bottom: 1px; }
+    .compact-distance .value { font-size: 16px; }
+
+    .control-panel.collapsed {
+      max-width: 360px;
+      padding: 8px;
+    }
+
+    .control-panel.collapsed .panel-details,
+    .control-panel.collapsed .dashboard-collapse { display: none; }
+    .control-panel.collapsed .compact-bar { display: flex; }
+
+    .compact-play {
+      width: 42px;
+      flex: 0 0 42px;
+      border-color: transparent;
+      background: var(--accent);
+      color: #10150f;
+      font-size: 17px;
+    }
+
+    .dashboard-expand {
+      width: 42px;
+      flex: 0 0 42px;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+
+    .stat {
+      min-width: 0;
+      padding: 0 10px;
+      border-left: 1px solid var(--line);
+    }
+
+    .stat:first-child { border-left: 0; }
+    .label {
+      display: block;
+      margin-bottom: 3px;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+
+    .value {
+      display: block;
+      overflow: hidden;
+      font-size: 17px;
+      font-variant-numeric: tabular-nums;
+      font-weight: 720;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .transport {
+      display: grid;
+      grid-template-columns: 44px 44px minmax(120px, 1fr) 56px auto auto;
+      gap: 10px;
+      align-items: center;
+    }
+
+    button {
+      height: 42px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, .07);
+      color: var(--ink);
+      cursor: pointer;
+      font: inherit;
+      font-size: 14px;
+      font-weight: 750;
+    }
+
+    button:hover { background: rgba(255, 255, 255, .13); }
+    button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    [data-play] { border-color: transparent; background: var(--accent); color: #10150f; font-size: 17px; }
+    [data-play]:hover { background: #dbff84; }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    .marker-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 750;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .marker-toggle input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+    }
+
+    .switch-track {
+      position: relative;
+      width: 38px;
+      height: 22px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, .1);
+      transition: background .2s;
+    }
+
+    .switch-track::after {
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--ink);
+      content: "";
+      transition: transform .2s;
+    }
+
+    .marker-toggle input:checked + .switch-track { background: var(--route); }
+    .marker-toggle input:checked + .switch-track::after { transform: translateX(16px); }
+    .marker-toggle input:focus-visible + .switch-track { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    .import-button {
+      display: inline-grid;
+      height: 42px;
+      padding: 0 14px;
+      place-items: center;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, .07);
+      color: var(--ink);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 750;
+      white-space: nowrap;
+    }
+
+    .import-button:hover { background: rgba(255, 255, 255, .13); }
+    .import-button:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .gpx-input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+
+    .marker-label {
+      display: grid;
+      width: 28px !important;
+      height: 28px !important;
+      margin: -14px 0 0 -14px !important;
+      place-items: center;
+      border: 2px solid rgba(255, 255, 255, .9);
+      border-radius: 50%;
+      background: #121814;
+      color: #fff;
+      box-shadow: 0 5px 16px rgba(0, 0, 0, .36);
+      font-size: 9px;
+      font-weight: 900;
+    }
+
+    .marker-label.end { background: #f2f4ef; color: #10150f; }
+
+    .km-marker {
+      border: 0;
+      background: transparent;
+    }
+
+    .km-marker span {
+      position: relative;
+      display: grid;
+      width: 42px;
+      height: 30px;
+      place-items: center;
+      border: 2px solid var(--route);
+      border-radius: 9px;
+      background: #fff;
+      color: #b20f1e;
+      box-shadow: 0 5px 15px rgba(0, 0, 0, .28);
+      font-size: 11px;
+      font-weight: 900;
+      animation: marker-pop .25s ease-out;
+    }
+
+    .km-marker span::after {
+      position: absolute;
+      bottom: -7px;
+      left: 14px;
+      border: 6px solid transparent;
+      border-top-color: var(--route);
+      border-bottom: 0;
+      content: "";
+    }
+
+    @keyframes marker-pop {
+      from { opacity: 0; transform: scale(.5) translateY(8px); }
+      to { opacity: 1; transform: scale(1) translateY(0); }
+    }
+
+    .leaflet-control-attribution {
+      border-radius: 8px 0 0;
+      background: rgba(255, 255, 255, .8) !important;
+      font-size: 10px;
+    }
+
+    .empty-state {
+      position: fixed;
+      z-index: 450;
+      inset: 50% auto auto 50%;
+      width: min(420px, calc(100% - 40px));
+      padding: 24px;
+      transform: translate(-50%, -50%);
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: rgba(15, 20, 18, .92);
+      box-shadow: 0 20px 70px rgba(0, 0, 0, .4);
+      backdrop-filter: blur(18px);
+      text-align: center;
+    }
+
+    .empty-state[hidden] { display: none; }
+    .empty-state h2 { margin: 0 0 8px; font-size: 24px; letter-spacing: -.035em; }
+    .empty-state p { margin: 0 auto 18px; max-width: 32ch; color: var(--muted); line-height: 1.5; }
+    .empty-state .import-button { display: inline-grid; background: var(--accent); color: #10150f; }
+    .empty-note { display: block; margin-top: 12px; color: #89928d; font-size: 11px; }
+    .status { position: fixed; overflow: hidden; width: 1px; height: 1px; clip: rect(0 0 0 0); }
+
+    @media (max-width: 580px) {
+      .topbar {
+        top: max(12px, env(safe-area-inset-top));
+        right: max(58px, calc(env(safe-area-inset-right) + 46px));
+        left: max(12px, env(safe-area-inset-left));
+        width: fit-content;
+        max-width: calc(100% - 82px);
+        padding: 11px 12px;
+      }
+      h1 { overflow: hidden; font-size: 24px; text-overflow: ellipsis; white-space: nowrap; }
+      .summary { display: none; }
+      .control-panel {
+        right: max(10px, env(safe-area-inset-right));
+        bottom: max(10px, env(safe-area-inset-bottom));
+        left: max(10px, env(safe-area-inset-left));
+        padding: 13px 10px;
+        border-radius: 17px;
+      }
+      .control-panel.collapsed { max-width: none; }
+      .stats { grid-template-columns: repeat(2, 1fr); row-gap: 12px; }
+      .stat:nth-child(3) { border-left: 0; }
+      .transport { grid-template-columns: 42px 42px 1fr 50px; gap: 6px; }
+      .marker-toggle { grid-column: 1 / 3; justify-self: start; margin: 6px 0 0 4px; }
+      .transport .import-button { grid-column: 3 / 5; margin-top: 6px; }
+      .empty-state { top: 46%; width: calc(100% - 32px); }
+    }
+
+    @media (max-height: 700px) and (max-width: 580px) {
+      .empty-state { top: 42%; }
+      .control-panel:not(.collapsed) .stats { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div id="map" aria-label="Animated GPX route map"></div>
+  <div class="shade"></div>
+
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">Route replay</p>
+      <h1 id="title">GPX Route Replay</h1>
+      <p class="summary" id="summary">Choose a GPX file to begin</p>
+    </div>
+  </header>
+
+  <section class="empty-state" id="empty-state">
+    <h2>Open a route from your iPhone</h2>
+    <p>Select a GPX file from Files or iCloud Drive. Your route stays in this browser and is never uploaded.</p>
+    <label class="import-button">
+      Choose GPX
+      <input class="gpx-input" type="file" accept=".gpx,application/gpx+xml,application/xml,text/xml">
+    </label>
+    <small class="empty-note">The last selected route will reopen on this device.</small>
+  </section>
+
+  <main class="control-panel" id="dashboard" aria-label="Route playback controls">
+    <button class="dashboard-collapse" id="dashboard-collapse" type="button" aria-label="Hide dashboard">⌄</button>
+    <div class="panel-details">
+      <section class="stats" aria-live="polite">
+        <div class="stat"><span class="label">Distance</span><span class="value" id="distance">0.00 km</span></div>
+        <div class="stat"><span class="label">Elapsed</span><span class="value" id="elapsed">0:00</span></div>
+        <div class="stat"><span class="label">Elevation</span><span class="value" id="elevation">—</span></div>
+        <div class="stat"><span class="label">Heart rate</span><span class="value" id="heart-rate">—</span></div>
+      </section>
+      <section class="transport">
+        <button type="button" data-play aria-label="Play route">▶</button>
+        <button id="restart" type="button" aria-label="Restart route">↺</button>
+        <input id="progress" type="range" min="0" max="1000" value="0" aria-label="Route progress">
+        <button id="speed" type="button" aria-label="Playback speed">1×</button>
+        <label class="marker-toggle">
+          <input id="marker-toggle" type="checkbox" checked>
+          <span class="switch-track" aria-hidden="true"></span>
+          KM markers
+        </label>
+        <label class="import-button">
+          Choose GPX
+          <input class="gpx-input" type="file" accept=".gpx,application/gpx+xml,application/xml,text/xml">
+        </label>
+      </section>
+    </div>
+    <div class="compact-bar">
+      <button class="compact-play" type="button" data-play aria-label="Play route">▶</button>
+      <div class="compact-distance">
+        <span class="label">Distance</span>
+        <span class="value" id="compact-distance">0.00 km</span>
+      </div>
+      <button class="dashboard-expand" id="dashboard-expand" type="button" aria-label="Show dashboard">⌃</button>
+    </div>
+  </main>
+  <p class="status" id="status" aria-live="polite"></p>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script>
+    const $ = (selector) => document.querySelector(selector);
+    const ui = {
+      title: $('#title'), summary: $('#summary'), distance: $('#distance'),
+      elapsed: $('#elapsed'), elevation: $('#elevation'), heartRate: $('#heart-rate'),
+      compactDistance: $('#compact-distance'), playButtons: [...document.querySelectorAll('[data-play]')],
+      restart: $('#restart'), progress: $('#progress'), speed: $('#speed'),
+      markerToggle: $('#marker-toggle'), dashboard: $('#dashboard'),
+      emptyState: $('#empty-state'), status: $('#status'),
+      fileInputs: [...document.querySelectorAll('.gpx-input')]
+    };
+
+    const map = L.map('map', { zoomControl: false, preferCanvas: true });
+    L.control.zoom({ position: 'topright' }).addTo(map);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+    }).addTo(map);
+    map.setView([22.3193, 114.1694], 12);
+    const routeLayers = L.layerGroup().addTo(map);
+
+    let points = [];
+    let cumulativeDistance = [];
+    let totalDistance = 0;
+    let totalDuration = 0;
+    let completedRoute;
+    let runner;
+    let mileageMarkers = [];
+    let playing = false;
+    let progress = 0;
+    let lastFrame = 0;
+    let speed = 1;
+    const replayDuration = 50;
+    const routeStore = { database: 'gpx-route-replay', store: 'routes', key: 'current' };
+
+    const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+    const formatTime = (seconds) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
+    const cleanFileName = (fileName) => fileName
+      .replace(/\.[^.]+$/, '')
+      .replace(/[_-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/\b\w/g, (letter) => letter.toUpperCase()) || 'GPX Route';
+    const haversine = (a, b) => {
+      const toRad = Math.PI / 180;
+      const dLat = (b.lat - a.lat) * toRad;
+      const dLon = (b.lon - a.lon) * toRad;
+      const x = Math.sin(dLat / 2) ** 2 +
+        Math.cos(a.lat * toRad) * Math.cos(b.lat * toRad) * Math.sin(dLon / 2) ** 2;
+      return 12742000 * Math.asin(Math.sqrt(x));
+    };
+
+    console.assert(
+      clamp(2, 0, 1) === 1 &&
+      formatTime(65) === '1:05' &&
+      cleanFileName('sample_route.gpx') === 'Sample Route',
+      'Playback helpers failed'
+    );
+
+    function openRouteDatabase() {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open(routeStore.database, 1);
+        request.onupgradeneeded = () => request.result.createObjectStore(routeStore.store);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    async function saveRoute(fileName, xmlText) {
+      const database = await openRouteDatabase();
+      await new Promise((resolve, reject) => {
+        const transaction = database.transaction(routeStore.store, 'readwrite');
+        transaction.objectStore(routeStore.store).put({ fileName, xmlText }, routeStore.key);
+        transaction.oncomplete = resolve;
+        transaction.onerror = () => reject(transaction.error);
+      });
+      database.close();
+    }
+
+    async function readSavedRoute() {
+      const database = await openRouteDatabase();
+      const saved = await new Promise((resolve, reject) => {
+        const request = database.transaction(routeStore.store).objectStore(routeStore.store).get(routeStore.key);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      database.close();
+      return saved;
+    }
+
+    function setDashboardCollapsed(collapsed) {
+      ui.dashboard.classList.toggle('collapsed', collapsed);
+      try { localStorage.setItem('dashboard-collapsed', String(collapsed)); } catch {}
+      setTimeout(() => map.invalidateSize(), 220);
+    }
+
+    function setPlayState(nextPlaying) {
+      playing = nextPlaying;
+      for (const button of ui.playButtons) {
+        button.textContent = playing ? 'Ⅱ' : '▶';
+        button.setAttribute('aria-label', playing ? 'Pause route' : progress >= 1 ? 'Replay route' : 'Play route');
+      }
+    }
+
+    function setStatus(message) {
+      ui.status.textContent = message;
+    }
+
+    function parseGpx(xmlText) {
+      const xml = new DOMParser().parseFromString(xmlText, 'application/xml');
+      if (xml.querySelector('parsererror')) throw new Error('The GPX file is not valid XML.');
+
+      const trackPoints = [...xml.getElementsByTagNameNS('*', 'trkpt')].map((node, index) => {
+        const value = (name) => node.getElementsByTagNameNS('*', name)[0]?.textContent;
+        return {
+          lat: Number(node.getAttribute('lat')),
+          lon: Number(node.getAttribute('lon')),
+          ele: Number(value('ele')),
+          time: Date.parse(value('time')),
+          hr: Number(value('hr')),
+          index
+        };
+      }).filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lon));
+
+      if (trackPoints.length < 2) throw new Error('The GPX file needs at least two track points.');
+      const fallbackStart = trackPoints.find((point) => Number.isFinite(point.time))?.time ?? 0;
+      trackPoints.forEach((point, index) => {
+        if (!Number.isFinite(point.time)) point.time = fallbackStart + index * 1000;
+      });
+      return { points: trackPoints };
+    }
+
+    function setup(track, fileName) {
+      setPlayState(false);
+      progress = 0;
+      lastFrame = 0;
+      for (const milestone of mileageMarkers) milestone.marker.remove();
+      routeLayers.clearLayers();
+      points = track.points;
+      ui.title.textContent = cleanFileName(fileName);
+      document.title = `${ui.title.textContent} — Route Replay`;
+      totalDuration = Math.max(1, (points.at(-1).time - points[0].time) / 1000);
+      cumulativeDistance = [0];
+      for (let i = 1; i < points.length; i++) {
+        cumulativeDistance[i] = cumulativeDistance[i - 1] + haversine(points[i - 1], points[i]);
+      }
+      totalDistance = cumulativeDistance.at(-1);
+
+      const latLngs = points.map((point) => [point.lat, point.lon]);
+      L.polyline(latLngs, { color: '#f5a3a0', opacity: .85, weight: 5, lineCap: 'round' }).addTo(routeLayers);
+      completedRoute = L.polyline([latLngs[0]], { color: '#e21d2f', opacity: 1, weight: 6, lineCap: 'round' }).addTo(routeLayers);
+      runner = L.circleMarker(latLngs[0], {
+        radius: 8, color: '#10150f', weight: 3, fillColor: '#c9ff45', fillOpacity: 1
+      }).addTo(routeLayers);
+
+      mileageMarkers = [];
+      for (let km = 1; km * 1000 <= totalDistance; km++) {
+        const distance = km * 1000;
+        const index = cumulativeDistance.findIndex((value) => value >= distance);
+        const previousDistance = cumulativeDistance[index - 1];
+        const mix = (distance - previousDistance) / (cumulativeDistance[index] - previousDistance);
+        const a = points[index - 1];
+        const b = points[index];
+        mileageMarkers.push({
+          distance,
+          marker: L.marker(
+            [a.lat + (b.lat - a.lat) * mix, a.lon + (b.lon - a.lon) * mix],
+            {
+              icon: L.divIcon({
+                className: 'km-marker',
+                html: `<span>${km} km</span>`,
+                iconSize: [42, 38],
+                iconAnchor: [21, 38]
+              }),
+              interactive: false
+            }
+          )
+        });
+      }
+      console.assert(mileageMarkers.length === Math.floor(totalDistance / 1000), 'Mileage marker setup failed');
+
+      const marker = (label, point, className = '') => L.marker([point.lat, point.lon], {
+        icon: L.divIcon({ className: `marker-label ${className}`, html: label, iconSize: [28, 28] }),
+        interactive: false
+      }).addTo(routeLayers);
+      marker('S', points[0]);
+      marker('F', points.at(-1), 'end');
+
+      map.fitBounds(L.latLngBounds(latLngs), { padding: [48, 48] });
+      ui.summary.textContent = `${(totalDistance / 1000).toFixed(2)} km · ${formatTime(totalDuration)} · ${points.length} track points`;
+      ui.emptyState.hidden = true;
+      setStatus(`${ui.title.textContent} loaded from this device.`);
+      render(0);
+    }
+
+    function updateMileageMarkers(distance) {
+      for (const milestone of mileageMarkers) {
+        const visible = ui.markerToggle.checked && milestone.distance <= distance;
+        if (visible && !map.hasLayer(milestone.marker)) milestone.marker.addTo(map);
+        if (!visible && map.hasLayer(milestone.marker)) milestone.marker.remove();
+      }
+    }
+
+    function pointAt(routeProgress) {
+      const targetTime = points[0].time + routeProgress * totalDuration * 1000;
+      let low = 0;
+      let high = points.length - 1;
+      while (low < high) {
+        const mid = Math.ceil((low + high) / 2);
+        if (points[mid].time <= targetTime) low = mid;
+        else high = mid - 1;
+      }
+      const index = Math.min(low, points.length - 2);
+      const a = points[index];
+      const b = points[index + 1];
+      const mix = clamp((targetTime - a.time) / Math.max(1, b.time - a.time), 0, 1);
+      return {
+        index,
+        lat: a.lat + (b.lat - a.lat) * mix,
+        lon: a.lon + (b.lon - a.lon) * mix,
+        ele: a.ele + (b.ele - a.ele) * mix,
+        hr: Math.round(a.hr + (b.hr - a.hr) * mix),
+        distance: cumulativeDistance[index] + haversine(a, { lat: a.lat + (b.lat - a.lat) * mix, lon: a.lon + (b.lon - a.lon) * mix })
+      };
+    }
+
+    function render(nextProgress) {
+      progress = clamp(nextProgress, 0, 1);
+      const current = pointAt(progress);
+      const latLng = [current.lat, current.lon];
+      completedRoute.setLatLngs([
+        ...points.slice(0, current.index + 1).map((point) => [point.lat, point.lon]),
+        latLng
+      ]);
+      runner.setLatLng(latLng);
+      ui.progress.value = Math.round(progress * 1000);
+      ui.distance.textContent = ui.compactDistance.textContent = `${(current.distance / 1000).toFixed(2)} km`;
+      ui.elapsed.textContent = formatTime(progress * totalDuration);
+      ui.elevation.textContent = Number.isFinite(current.ele) ? `${Math.round(current.ele)} m` : '—';
+      ui.heartRate.textContent = Number.isFinite(current.hr) ? `${current.hr} bpm` : '—';
+      updateMileageMarkers(current.distance);
+    }
+
+    function frame(timestamp) {
+      if (!playing) return;
+      if (!lastFrame) lastFrame = timestamp;
+      render(progress + ((timestamp - lastFrame) / 1000 / replayDuration) * speed);
+      lastFrame = timestamp;
+      if (progress >= 1) {
+        setPlayState(false);
+        return;
+      }
+      requestAnimationFrame(frame);
+    }
+
+    function togglePlayback() {
+      if (!points.length) {
+        ui.fileInputs[0].click();
+        return;
+      }
+      if (progress >= 1) render(0);
+      setPlayState(!playing);
+      lastFrame = 0;
+      if (playing) requestAnimationFrame(frame);
+    }
+
+    for (const button of ui.playButtons) button.addEventListener('click', togglePlayback);
+    ui.restart.addEventListener('click', () => {
+      if (!points.length) return;
+      render(0);
+      if (!playing) togglePlayback();
+    });
+    ui.progress.addEventListener('input', (event) => {
+      if (points.length) render(Number(event.target.value) / 1000);
+    });
+    ui.speed.addEventListener('click', () => {
+      speed = speed === 1 ? 2 : speed === 2 ? 4 : 1;
+      ui.speed.textContent = `${speed}×`;
+    });
+    ui.markerToggle.addEventListener('change', () => {
+      if (points.length) updateMileageMarkers(pointAt(progress).distance);
+    });
+    $('#dashboard-collapse').addEventListener('click', () => setDashboardCollapsed(true));
+    $('#dashboard-expand').addEventListener('click', () => setDashboardCollapsed(false));
+
+    async function importGpx(file) {
+      if (!file) return;
+      try {
+        const xmlText = await file.text();
+        setup(parseGpx(xmlText), file.name);
+        try {
+          await saveRoute(file.name, xmlText);
+          setStatus(`${cleanFileName(file.name)} loaded and saved on this device.`);
+        } catch {
+          setStatus(`${cleanFileName(file.name)} loaded. Private browsing prevented local saving.`);
+        }
+      } catch (error) {
+        ui.emptyState.hidden = false;
+        ui.emptyState.querySelector('p').textContent = error.message;
+        setStatus(error.message);
+      }
+    }
+
+    for (const input of ui.fileInputs) {
+      input.addEventListener('change', async (event) => {
+        await importGpx(event.target.files[0]);
+        for (const otherInput of ui.fileInputs) otherInput.value = '';
+      });
+    }
+
+    const savedDashboardState = (() => {
+      try { return localStorage.getItem('dashboard-collapsed'); } catch { return null; }
+    })();
+    setDashboardCollapsed(
+      savedDashboardState === null
+        ? matchMedia('(max-width: 580px)').matches
+        : savedDashboardState === 'true'
+    );
+
+    readSavedRoute()
+      .then((saved) => {
+        if (saved) setup(parseGpx(saved.xmlText), saved.fileName);
+      })
+      .catch(() => setStatus('Choose a GPX file to begin.'));
+  </script>
+</body>
+</html>

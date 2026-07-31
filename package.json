@@ -1,0 +1,8 @@
+{
+  "name": "gpx-route-replay",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  }
+}

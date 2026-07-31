@@ -1,0 +1,4 @@
+.DS_Store
+*.gpx
+dist/
+*.tar.gz
