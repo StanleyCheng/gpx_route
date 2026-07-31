@@ -199,6 +199,11 @@
       gap: 10px;
     }
 
+    .marker-switches {
+      display: grid;
+      gap: 8px;
+    }
+
     button {
       height: 42px;
       border: 1px solid var(--line);
@@ -446,11 +451,18 @@
         <input id="progress" type="range" min="0" max="1000" value="0" aria-label="Route progress">
         <button id="speed" type="button" aria-label="Playback speed">1×</button>
         <div class="secondary-controls">
-          <label class="marker-toggle">
-            <input id="marker-toggle" type="checkbox" checked>
-            <span class="switch-track" aria-hidden="true"></span>
-            KM markers
-          </label>
+          <div class="marker-switches">
+            <label class="marker-toggle">
+              <input id="marker-toggle" type="checkbox" checked>
+              <span class="switch-track" aria-hidden="true"></span>
+              KM markers
+            </label>
+            <label class="marker-toggle">
+              <input id="endpoint-toggle" type="checkbox" checked>
+              <span class="switch-track" aria-hidden="true"></span>
+              Start / finish
+            </label>
+          </div>
           <label class="import-button">
             Choose GPX
             <input class="gpx-input" type="file" accept=".gpx,application/gpx+xml,application/xml,text/xml">
@@ -478,7 +490,7 @@
       elapsed: $('#elapsed'), elevation: $('#elevation'), heartRate: $('#heart-rate'),
       compactDistance: $('#compact-distance'), playButtons: [...document.querySelectorAll('[data-play]')],
       restart: $('#restart'), progress: $('#progress'), speed: $('#speed'),
-      markerToggle: $('#marker-toggle'), dashboard: $('#dashboard'),
+      markerToggle: $('#marker-toggle'), endpointToggle: $('#endpoint-toggle'), dashboard: $('#dashboard'),
       emptyState: $('#empty-state'), status: $('#status'),
       fileInputs: [...document.querySelectorAll('.gpx-input')]
     };
@@ -499,6 +511,7 @@
     let completedRoute;
     let runner;
     let mileageMarkers = [];
+    let endpointMarkers = [];
     let playing = false;
     let progress = 0;
     let lastFrame = 0;
@@ -609,6 +622,7 @@
       lastFrame = 0;
       for (const milestone of mileageMarkers) milestone.marker.remove();
       routeLayers.clearLayers();
+      endpointMarkers = [];
       points = track.points;
       ui.title.textContent = cleanFileName(fileName);
       document.title = `${ui.title.textContent} — Route Replay`;
@@ -655,9 +669,9 @@
       const marker = (label, point, className = '') => L.marker([point.lat, point.lon], {
         icon: L.divIcon({ className: `marker-label ${className}`, html: label, iconSize: [28, 28] }),
         interactive: false
-      }).addTo(routeLayers);
-      marker('S', points[0]);
-      marker('F', points.at(-1), 'end');
+      });
+      endpointMarkers = [marker('S', points[0]), marker('F', points.at(-1), 'end')];
+      updateEndpointMarkers();
 
       map.fitBounds(L.latLngBounds(latLngs), { padding: [48, 48] });
       ui.summary.textContent = `${(totalDistance / 1000).toFixed(2)} km · ${formatTime(totalDuration)} · ${points.length} track points`;
@@ -671,6 +685,13 @@
         const visible = ui.markerToggle.checked && milestone.distance <= distance;
         if (visible && !map.hasLayer(milestone.marker)) milestone.marker.addTo(map);
         if (!visible && map.hasLayer(milestone.marker)) milestone.marker.remove();
+      }
+    }
+
+    function updateEndpointMarkers() {
+      for (const marker of endpointMarkers) {
+        if (ui.endpointToggle.checked && !routeLayers.hasLayer(marker)) routeLayers.addLayer(marker);
+        if (!ui.endpointToggle.checked && routeLayers.hasLayer(marker)) routeLayers.removeLayer(marker);
       }
     }
 
@@ -753,6 +774,7 @@
     ui.markerToggle.addEventListener('change', () => {
       if (points.length) updateMileageMarkers(pointAt(progress).distance);
     });
+    ui.endpointToggle.addEventListener('change', updateEndpointMarkers);
     $('#dashboard-collapse').addEventListener('click', () => setDashboardCollapsed(true));
     $('#dashboard-expand').addEventListener('click', () => setDashboardCollapsed(false));
 
