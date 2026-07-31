@@ -707,14 +707,18 @@
       };
       if (enabled) {
         map.jumpTo({ pitch: 0, bearing: 0 });
+        let terrainReadyTimer;
         const moveWhenTerrainReady = (event) => {
-          if (event.sourceId !== 'terrain-dem' || !event.isSourceLoaded) return;
-          map.off('sourcedata', moveWhenTerrainReady);
-          moveCamera();
+          if (event.sourceId !== 'terrain-dem' || !event.tile) return;
+          clearTimeout(terrainReadyTimer);
+          terrainReadyTimer = setTimeout(() => {
+            map.off('sourcedata', moveWhenTerrainReady);
+            moveCamera();
+          }, 500);
         };
         map.on('sourcedata', moveWhenTerrainReady);
         map.setTerrain({ source: 'terrain-dem', exaggeration: 1 });
-        if (map.isSourceLoaded('terrain-dem')) moveWhenTerrainReady({ sourceId: 'terrain-dem', isSourceLoaded: true });
+        if (map.isSourceLoaded('terrain-dem')) moveWhenTerrainReady({ sourceId: 'terrain-dem', tile: true });
       } else {
         map.setTerrain(null);
         moveCamera();
