@@ -409,17 +409,16 @@
         <button id="restart" type="button" aria-label="Restart route">↺</button>
         <input id="progress" type="range" min="0" max="1000" value="0" aria-label="Route progress">
         <select id="speed" aria-label="Playback speed">
+          <option value="0.05">0.05×</option>
           <option value="0.1">0.1×</option>
-          <option value="0.25">0.25×</option>
           <option value="0.5">0.5×</option>
           <option value="1" selected>1×</option>
           <option value="2">2×</option>
-          <option value="4">4×</option>
         </select>
         <div class="secondary-controls">
           <div class="toggle-grid">
             <label class="marker-toggle">
-              <input id="marker-toggle" type="checkbox" checked>
+              <input id="marker-toggle" type="checkbox">
               <span class="switch-track" aria-hidden="true"></span>
               KM markers
             </label>
@@ -429,12 +428,12 @@
               Start / finish
             </label>
             <label class="marker-toggle">
-              <input id="view-3d-toggle" type="checkbox">
+              <input id="view-3d-toggle" type="checkbox" checked>
               <span class="switch-track" aria-hidden="true"></span>
               3D terrain
             </label>
             <label class="marker-toggle">
-              <input id="follow-toggle" type="checkbox">
+              <input id="follow-toggle" type="checkbox" checked>
               <span class="switch-track" aria-hidden="true"></span>
               Follow
             </label>
@@ -515,16 +514,23 @@
     let playing = false;
     let progress = 0;
     let lastFrame = 0;
-    let lastCameraUpdate = 0;
     let followBearing = 0;
+    let followCamera = null;
+    let followCorrectionPending = false;
     let speed = 1;
     let overlayCompleted = [];
+    let overlayVisible = false;
     let view3dEnabled = false;
     let tubeReady = false;
     const replayDuration = 50;
+    const tubeRadius = 6;
     const routeStore = { database: 'gpx-route-replay', store: 'routes', key: 'current' };
+    const preferenceDefaultsVersion = '2';
 
     const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+    const savePreference = (key, value) => {
+      try { localStorage.setItem(key, String(value)); } catch {}
+    };
     const formatTime = (seconds) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
     const cleanFileName = (fileName) => fileName
       .replace(/\.[^.]+$/, '')
@@ -540,13 +546,6 @@
       const x = Math.sin(dLat / 2) ** 2 +
         Math.cos(a.lat * toRad) * Math.cos(b.lat * toRad) * Math.sin(dLon / 2) ** 2;
       return 12742000 * Math.asin(Math.sqrt(x));
-    };
-
-    const samplePoints = (list, maximum) => {
-      if (list.length <= maximum) return [...list];
-      return Array.from({ length: maximum }, (_, index) =>
-        list[Math.round(index * (list.length - 1) / (maximum - 1))]
-      );
     };
 
     const bearingBetween = (a, b) => {
@@ -566,15 +565,44 @@
       return current + delta * amount;
     };
 
+    const PolylineCurve3 = THREE ? class extends THREE.Curve {
+      constructor(curvePoints) {
+        super();
+        this.points = curvePoints;
+      }
+
+      getPoint(value, target = new THREE.Vector3()) {
+        const position = clamp(value, 0, 1) * (this.points.length - 1);
+        const index = Math.min(Math.floor(position), this.points.length - 2);
+        return target.copy(this.points[index]).lerp(this.points[index + 1], position - index);
+      }
+
+      getPointAt(value, target) { return this.getPoint(value, target); }
+
+      getTangentAt(value, target = new THREE.Vector3()) {
+        const halfStep = .5 / (this.points.length - 1);
+        const before = this.getPoint(value - halfStep);
+        const after = this.getPoint(value + halfStep);
+        return target.copy(after).sub(before).normalize();
+      }
+    } : null;
+
     console.assert(
       clamp(2, 0, 1) === 1 &&
       formatTime(65) === '1:05' &&
       cleanFileName('sample_route.gpx') === 'Sample Route' &&
-      samplePoints([0, 1, 2, 3, 4], 3).join() === '0,2,4' &&
-      [...ui.speed.options].map((option) => Number(option.value)).join() === '0.1,0.25,0.5,1,2,4' &&
+      [...ui.speed.options].map((option) => Number(option.value)).join() === '0.05,0.1,0.5,1,2' &&
       Math.abs(blendBearing(170, -170, .5) - 180) < .001,
       'Route helpers failed'
     );
+    if (PolylineCurve3) {
+      const corner = new PolylineCurve3([
+        new THREE.Vector3(0, 0, 0),
+        new THREE.Vector3(1, 0, 0),
+        new THREE.Vector3(1, 1, 0)
+      ]).getPointAt(.5);
+      console.assert(corner.distanceTo(new THREE.Vector3(1, 0, 0)) < 1e-9, 'Polyline route alignment failed');
+    }
 
     function lineFeature(list) {
       if (list.length < 2) return emptyFeatureCollection();
@@ -586,6 +614,8 @@
     }
 
     function drawRouteOverlay() {
+      const shouldDraw = view3dEnabled && !tubeReady && displayPoints.length >= 2;
+      if (!shouldDraw && !overlayVisible) return;
       const width = routeOverlay.clientWidth;
       const height = routeOverlay.clientHeight;
       const scale = devicePixelRatio || 1;
@@ -596,7 +626,8 @@
       const context = routeOverlay.getContext('2d');
       context.setTransform(scale, 0, 0, scale, 0, 0);
       context.clearRect(0, 0, width, height);
-      if (!view3dEnabled || tubeReady || displayPoints.length < 2) return;
+      overlayVisible = shouldDraw;
+      if (!shouldDraw) return;
 
       const trace = (list) => {
         context.beginPath();
@@ -662,6 +693,7 @@
         routeTubeLayer[key] = null;
       }
       routeTubeLayer.curve = null;
+      routeTubeLayer.pointIndexes = null;
       tubeReady = false;
     }
 
@@ -670,9 +702,15 @@
       const faceStrip = radialSegments * 6;
       return Math.floor(indexCount * clamp(value, 0, 1) / faceStrip) * faceStrip;
     };
+    const screenCenterOffset = (tip, width, height) => [
+      clamp(-tip.x * width / 2, -width / 3, width / 3),
+      clamp(tip.y * height / 2, -height / 3, height / 3)
+    ];
     console.assert(
-      tubeDrawCount(600, 5, .5) === 300 && tubeDrawCount(600, 5, 1) === 600,
-      '3D tube progress failed'
+      tubeDrawCount(600, 5, .5) === 300 &&
+      tubeDrawCount(600, 5, 1) === 600 &&
+      screenCenterOffset({ x: .5, y: -.5 }, 300, 600).join() === '-75,-150',
+      '3D route helpers failed'
     );
 
     function syncRouteLayerVisibility() {
@@ -696,18 +734,26 @@
       if (view3dEnabled) map.triggerRepaint();
     }
 
+    function tubeProgressAt(current) {
+      if (!tubeReady) return progress;
+      const start = routeTubeLayer.pointIndexes[current.index] ?? 0;
+      const end = routeTubeLayer.pointIndexes[current.index + 1] ?? start;
+      return (start + (end - start) * current.mix) / (routeTubeLayer.curve.points.length - 1);
+    }
+
     function buildTubeRoute(list, useTerrain = false) {
       if (!routeTubeLayer.scene || list.length < 2) return;
       clearTubeRoute();
       const mobile = matchMedia('(max-width: 580px)').matches;
-      const route = samplePoints(list, mobile ? 320 : 640);
+      const route = list;
       const altitude = (point) => {
         const terrain = useTerrain ? map.queryTerrainElevation([point.lon, point.lat]) : null;
-        return (Number.isFinite(terrain) ? terrain : Number.isFinite(point.ele) ? point.ele : 0) + 8;
+        return (Number.isFinite(terrain) ? terrain : Number.isFinite(point.ele) ? point.ele : 0) + tubeRadius;
       };
       const origin = maplibregl.MercatorCoordinate.fromLngLat([route[0].lon, route[0].lat], altitude(route[0]));
       const scale = origin.meterInMercatorCoordinateUnits();
       const vectors = [];
+      const pointIndexes = [];
       for (const point of route) {
         const coordinate = maplibregl.MercatorCoordinate.fromLngLat([point.lon, point.lat], altitude(point));
         const vector = new THREE.Vector3(
@@ -715,34 +761,35 @@
           -(coordinate.y - origin.y) / scale,
           (coordinate.z - origin.z) / scale
         );
-        if (!vectors.length || vector.distanceToSquared(vectors.at(-1)) > .01) vectors.push(vector);
+        if (!vectors.length || vector.distanceToSquared(vectors.at(-1)) > 1e-8) vectors.push(vector);
+        pointIndexes[point.index] = vectors.length - 1;
       }
       if (vectors.length < 2) return;
 
       const radialSegments = mobile ? 5 : 8;
-      const tubularSegments = Math.max(24, vectors.length - 1);
-      const curve = new THREE.CatmullRomCurve3(vectors, false, 'centripetal');
+      const tubularSegments = vectors.length - 1;
+      const curve = new PolylineCurve3(vectors);
       const fullMesh = new THREE.Mesh(
-        new THREE.TubeGeometry(curve, tubularSegments, 2.15, radialSegments, false),
-        new THREE.MeshStandardMaterial({ color: 0xe21d2f, transparent: true, opacity: .22, roughness: .7, depthWrite: false })
+        new THREE.TubeGeometry(curve, tubularSegments, tubeRadius, radialSegments, false),
+        new THREE.MeshStandardMaterial({ color: 0xe21d2f, transparent: true, opacity: .16, roughness: .7, depthWrite: false })
       );
       const completeMesh = new THREE.Mesh(
-        new THREE.TubeGeometry(curve, tubularSegments, 3, radialSegments, false),
+        new THREE.TubeGeometry(curve, tubularSegments, tubeRadius, radialSegments, false),
         new THREE.MeshStandardMaterial({ color: 0xe21d2f, emissive: 0x5f050d, emissiveIntensity: .65, roughness: .32, metalness: .12 })
       );
       const runnerMesh = new THREE.Mesh(
-        new THREE.SphereGeometry(4.5, mobile ? 10 : 14, mobile ? 6 : 9),
+        new THREE.SphereGeometry(9, mobile ? 10 : 14, mobile ? 6 : 9),
         new THREE.MeshStandardMaterial({ color: 0xc9ff45, emissive: 0x668f00, emissiveIntensity: .7, roughness: .28 })
       );
       completeMesh.renderOrder = 1;
       runnerMesh.renderOrder = 2;
       routeTubeLayer.scene.add(fullMesh, completeMesh, runnerMesh);
       Object.assign(routeTubeLayer, {
-        curve, fullMesh, completeMesh, runnerMesh, radialSegments,
+        curve, fullMesh, completeMesh, runnerMesh, radialSegments, pointIndexes,
         transform: { x: origin.x, y: origin.y, z: origin.z, scale }
       });
       tubeReady = true;
-      setTubeProgress(totalDistance ? pointAt(progress).distance / totalDistance : progress);
+      setTubeProgress(tubeProgressAt(pointAt(progress)));
       syncRouteLayerVisibility();
     }
 
@@ -758,8 +805,8 @@
         maxzoom: 15,
         encoding: 'terrarium'
       });
-      map.addSource('route-full', { type: 'geojson', data: emptyFeatureCollection(), tolerance: .8 });
-      map.addSource('route-complete', { type: 'geojson', data: emptyFeatureCollection(), tolerance: .8 });
+      map.addSource('route-full', { type: 'geojson', data: emptyFeatureCollection(), tolerance: 0 });
+      map.addSource('route-complete', { type: 'geojson', data: emptyFeatureCollection(), tolerance: 0 });
       map.addSource('runner', { type: 'geojson', data: emptyFeatureCollection() });
 
       const firstSymbol = map.getStyle().layers.find((layer) => layer.type === 'symbol')?.id;
@@ -858,7 +905,7 @@
     function setViewMode(enabled, animate = true) {
       view3dEnabled = enabled;
       ui.view3dToggle.checked = enabled;
-      try { localStorage.setItem('3d-enabled', String(enabled)); } catch {}
+      savePreference('3d-enabled', enabled);
       if (!mapReady) return;
 
       if (map.getLayer('3d-buildings')) map.setLayoutProperty('3d-buildings', 'visibility', enabled ? 'visible' : 'none');
@@ -932,7 +979,7 @@
       mileageMarkers = [];
       endpointMarkers = [];
       points = track.points;
-      displayPoints = samplePoints(points, 1500);
+      displayPoints = points;
       ui.title.textContent = cleanFileName(fileName);
       document.title = `${ui.title.textContent} — Route Replay`;
       totalDuration = Math.max(1, (points.at(-1).time - points[0].time) / 1000);
@@ -1018,6 +1065,7 @@
       const mix = clamp((targetTime - a.time) / Math.max(1, b.time - a.time), 0, 1);
       const current = {
         index,
+        mix,
         lat: a.lat + (b.lat - a.lat) * mix,
         lon: a.lon + (b.lon - a.lon) * mix,
         ele: a.ele + (b.ele - a.ele) * mix,
@@ -1028,8 +1076,8 @@
       return current;
     }
 
-    function updateFollowCamera(current, timestamp = performance.now()) {
-      if (!ui.followToggle.checked || timestamp - lastCameraUpdate < 220) return;
+    function updateFollowCamera(current) {
+      if (!ui.followToggle.checked) return;
       followBearing = blendBearing(followBearing, current.bearing, .28);
       const camera = {
         center: [current.lon, current.lat],
@@ -1037,9 +1085,26 @@
         pitch: view3dEnabled ? 50 : 0,
         zoom: Math.max(map.getZoom(), view3dEnabled ? 15.3 : 14.5)
       };
-      if (reducedMotion) map.jumpTo(camera);
-      else map.easeTo({ ...camera, duration: 360, essential: false });
-      lastCameraUpdate = timestamp;
+      followCamera = camera;
+      map.jumpTo(camera);
+      if (!view3dEnabled || !tubeReady || !routeTubeLayer.camera?.projectionMatrix) {
+        return;
+      }
+      if (followCorrectionPending) return;
+      followCorrectionPending = true;
+      map.once('render', () => {
+        followCorrectionPending = false;
+        if (!ui.followToggle.checked || !view3dEnabled || !tubeReady) return;
+        const tip = routeTubeLayer.runnerMesh.position.clone().applyMatrix4(routeTubeLayer.camera.projectionMatrix);
+        const width = map.getCanvas().clientWidth;
+        const height = map.getCanvas().clientHeight;
+        map.easeTo({
+          ...followCamera,
+          offset: screenCenterOffset(tip, width, height),
+          duration: 0
+        });
+        map.triggerRepaint();
+      });
     }
 
     function render(nextProgress) {
@@ -1050,7 +1115,7 @@
       overlayCompleted = completed;
       if (!view3dEnabled) map.getSource('route-complete').setData(lineFeature(completed));
       drawRouteOverlay();
-      setTubeProgress(totalDistance ? current.distance / totalDistance : progress);
+      setTubeProgress(tubeProgressAt(current));
       if (!view3dEnabled || !tubeReady) {
         map.getSource('runner').setData({
           type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [current.lon, current.lat] }
@@ -1102,15 +1167,17 @@
       setStatus(`Playback speed set to ${speed} times.`);
     });
     ui.markerToggle.addEventListener('change', () => {
+      savePreference('km-markers-enabled', ui.markerToggle.checked);
       if (points.length) updateMileageMarkers(pointAt(progress).distance);
     });
     ui.endpointToggle.addEventListener('change', updateEndpointMarkers);
     ui.view3dToggle.addEventListener('change', () => setViewMode(ui.view3dToggle.checked));
     ui.followToggle.addEventListener('change', () => {
+      savePreference('follow-enabled', ui.followToggle.checked);
       if (ui.followToggle.checked && points.length) {
-        followBearing = pointAt(progress).bearing;
-        lastCameraUpdate = 0;
-        updateFollowCamera(pointAt(progress));
+        const current = pointAt(progress);
+        followBearing = current.bearing;
+        updateFollowCamera(current);
       }
       setStatus(ui.followToggle.checked ? 'Follow camera enabled.' : 'Follow camera disabled.');
     });
@@ -1123,6 +1190,7 @@
       map.on(eventName, (event) => {
         if (event.originalEvent && ui.followToggle.checked) {
           ui.followToggle.checked = false;
+          savePreference('follow-enabled', false);
           setStatus('Follow camera paused for manual map movement.');
         }
       });
@@ -1162,8 +1230,20 @@
         ? matchMedia('(max-width: 580px)').matches
         : savedDashboardState === 'true'
     );
-    view3dEnabled = readPreference('3d-enabled') === 'true';
-    ui.view3dToggle.checked = view3dEnabled;
+    if (readPreference('preference-defaults-version') !== preferenceDefaultsVersion) {
+      ui.markerToggle.checked = false;
+      ui.view3dToggle.checked = true;
+      ui.followToggle.checked = true;
+      savePreference('km-markers-enabled', false);
+      savePreference('3d-enabled', true);
+      savePreference('follow-enabled', true);
+      savePreference('preference-defaults-version', preferenceDefaultsVersion);
+    } else {
+      ui.markerToggle.checked = readPreference('km-markers-enabled') === 'true';
+      ui.view3dToggle.checked = readPreference('3d-enabled') !== 'false';
+      ui.followToggle.checked = readPreference('follow-enabled') !== 'false';
+    }
+    view3dEnabled = ui.view3dToggle.checked;
 
     readSavedRoute()
       .then((saved) => saved
