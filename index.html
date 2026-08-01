@@ -926,11 +926,19 @@
       };
       if (enabled) {
         map.jumpTo({ pitch: 0, bearing: 0 });
-        map.setTerrain({ source: 'terrain-dem', exaggeration: 1 });
-        setTimeout(() => {
-          moveCamera();
-          if (view3dEnabled && displayPoints.length) buildTubeRoute(displayPoints, true);
-        }, 3000);
+        const enableTerrain = () => {
+          if (!view3dEnabled) return;
+          map.setTerrain({ source: 'terrain-dem', exaggeration: 1 });
+          setTimeout(() => {
+            moveCamera();
+            if (view3dEnabled && displayPoints.length) buildTubeRoute(displayPoints, true);
+          }, 3000);
+        };
+        if (animate) enableTerrain();
+        else {
+          map.setTerrain(null);
+          setTimeout(enableTerrain, 500);
+        }
       } else {
         map.setTerrain(null);
         moveCamera();
