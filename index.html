@@ -577,6 +577,16 @@
       };
     }
 
+    const usableProjection = (point, width, height) =>
+      Number.isFinite(point.x) && Number.isFinite(point.y) &&
+      point.x >= -width && point.x <= width * 2 &&
+      point.y >= -height && point.y <= height * 2;
+    console.assert(
+      usableProjection({ x: 150, y: 300 }, 300, 600) &&
+      !usableProjection({ x: -1000, y: 300 }, 300, 600),
+      'Route projection guard failed'
+    );
+
     function drawRouteOverlay() {
       if (!view3dEnabled && !overlayVisible) return;
       const width = routeOverlay.clientWidth;
@@ -593,9 +603,17 @@
       if (!overlayVisible) return;
 
       context.beginPath();
-      for (const [index, point] of completedRoute.entries()) {
+      const maxJump = Math.hypot(width, height);
+      let previous = null;
+      for (const point of completedRoute) {
         const projected = map.project([point.lon, point.lat]);
-        context[index ? 'lineTo' : 'moveTo'](projected.x, projected.y);
+        if (!usableProjection(projected, width, height)) {
+          previous = null;
+          continue;
+        }
+        const continuous = previous && Math.hypot(projected.x - previous.x, projected.y - previous.y) <= maxJump;
+        context[continuous ? 'lineTo' : 'moveTo'](projected.x, projected.y);
+        previous = projected;
       }
       context.lineCap = 'round';
       context.lineJoin = 'round';
@@ -604,6 +622,7 @@
       context.stroke();
 
       const tip = map.project([completedRoute.at(-1).lon, completedRoute.at(-1).lat]);
+      if (!usableProjection(tip, width, height)) return;
       context.beginPath();
       context.arc(tip.x, tip.y, 8, 0, Math.PI * 2);
       context.fillStyle = '#c9ff45';
@@ -747,7 +766,6 @@
         map.setTerrain(null);
         moveCamera();
       }
-      drawRouteOverlay();
       setStatus(enabled ? '3D terrain enabled.' : '2D map enabled.');
     }
 
@@ -915,7 +933,6 @@
       ui.heartRate.textContent = Number.isFinite(current.hr) ? `${current.hr} bpm` : '—';
       updateMileageMarkers(current.distance);
       updateFollowCamera(current);
-      drawRouteOverlay();
     }
 
     function frame(timestamp) {
@@ -969,7 +986,7 @@
       }
       setStatus(ui.followToggle.checked ? 'Follow camera enabled.' : 'Follow camera disabled.');
     });
-    map.on('move', drawRouteOverlay);
+    map.on('render', drawRouteOverlay);
     map.on('resize', drawRouteOverlay);
     $('#dashboard-collapse').addEventListener('click', () => setDashboardCollapsed(true));
     $('#dashboard-expand').addEventListener('click', () => setDashboardCollapsed(false));
