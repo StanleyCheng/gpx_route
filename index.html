@@ -800,6 +800,18 @@
       return new maplibregl.Marker({ element, anchor: 'center', opacityWhenCovered: 1 }).setLngLat([point.lon, point.lat]);
     }
 
+    function fitRouteOverview(duration = 800) {
+      const bounds = new maplibregl.LngLatBounds();
+      displayPoints.forEach((point) => bounds.extend([point.lon, point.lat]));
+      map.fitBounds(bounds, {
+        padding: { top: 110, right: 55, bottom: ui.dashboard.classList.contains('collapsed') ? 100 : 260, left: 55 },
+        bearing: 0,
+        pitch: 0,
+        duration: reducedMotion ? 0 : duration,
+        essential: false
+      });
+    }
+
     async function setup(track, fileName) {
       setPlayState(false);
       progress = 0;
@@ -847,12 +859,7 @@
       endpointMarkers = [makeMarker('S', points[0]), makeMarker('F', points.at(-1), 'end')];
       updateEndpointMarkers();
 
-      const bounds = new maplibregl.LngLatBounds();
-      displayPoints.forEach((point) => bounds.extend([point.lon, point.lat]));
-      map.fitBounds(bounds, {
-        padding: { top: 110, right: 55, bottom: ui.dashboard.classList.contains('collapsed') ? 100 : 260, left: 55 },
-        duration: reducedMotion ? 0 : 800
-      });
+      fitRouteOverview();
       setViewMode(view3dEnabled, false);
       ui.summary.textContent = `${(totalDistance / 1000).toFixed(2)} km · ${formatTime(totalDuration)} · ${points.length} track points`;
       ui.emptyState.hidden = true;
@@ -942,6 +949,7 @@
       lastFrame = timestamp;
       if (progress >= 1) {
         setPlayState(false);
+        if (ui.followToggle.checked) fitRouteOverview(1200);
         return;
       }
       requestAnimationFrame(frame);
