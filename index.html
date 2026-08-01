@@ -721,6 +721,9 @@
       if (!mapReady) return;
 
       if (map.getLayer('3d-buildings')) map.setLayoutProperty('3d-buildings', 'visibility', enabled ? 'visible' : 'none');
+      for (const id of ['route-complete', 'runner-shadow', 'runner-dot']) {
+        if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', enabled ? 'none' : 'visible');
+      }
 
       const camera = { pitch: enabled ? 50 : 0, bearing: enabled ? -18 : 0 };
       const moveCamera = () => {
