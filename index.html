@@ -10,7 +10,7 @@
   <meta name="twitter:card" content="summary_large_image">
   <title>GPX Route Replay</title>
   <link rel="icon" type="image/png" sizes="192x192" href="/favicon.png?v=1">
-  <link rel="apple-touch-icon" href="/favicon.png?v=1">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=1">
   <link rel="preconnect" href="https://api.maptiler.com">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.19.0/dist/maplibre-gl.css">
   <style>
@@ -275,32 +275,25 @@
     .km-marker span {
       position: relative;
       display: grid;
-      width: 42px;
-      height: 30px;
+      width: 34px;
+      height: 34px;
       place-items: center;
       border: 2px solid var(--route);
-      border-radius: 9px;
+      border-radius: 50% 50% 50% 4px;
       background: #fff;
       color: #b20f1e;
       box-shadow: 0 5px 15px rgba(0, 0, 0, .28);
-      font-size: 11px;
+      font-size: 12px;
       font-weight: 900;
+      transform: rotate(-45deg);
       animation: marker-pop .25s ease-out;
     }
 
-    .km-marker span::after {
-      position: absolute;
-      bottom: -7px;
-      left: 14px;
-      border: 6px solid transparent;
-      border-top-color: var(--route);
-      border-bottom: 0;
-      content: "";
-    }
+    .km-marker span b { transform: rotate(45deg); }
 
     @keyframes marker-pop {
-      from { opacity: 0; transform: scale(.5) translateY(8px); }
-      to { opacity: 1; transform: scale(1) translateY(0); }
+      from { opacity: 0; transform: rotate(-45deg) scale(.5) translateY(8px); }
+      to { opacity: 1; transform: rotate(-45deg) scale(1) translateY(0); }
     }
 
     .maplibregl-ctrl-top-right { top: max(12px, env(safe-area-inset-top)); right: max(10px, env(safe-area-inset-right)); }
@@ -416,6 +409,7 @@
         <button id="restart" type="button" aria-label="Restart route">↺</button>
         <input id="progress" type="range" min="0" max="1000" value="0" aria-label="Route progress">
         <select id="speed" aria-label="Playback speed">
+          <option value="0.1">0.1×</option>
           <option value="0.25">0.25×</option>
           <option value="0.5">0.5×</option>
           <option value="1" selected>1×</option>
@@ -464,7 +458,8 @@
   <p class="status" id="status" aria-live="polite"></p>
 
   <script src="https://unpkg.com/maplibre-gl@5.19.0/dist/maplibre-gl.js"></script>
-  <script>
+  <script type="module">
+    const THREE = await import('https://unpkg.com/three@0.180.0/build/three.module.js').catch(() => null);
     const $ = (selector) => document.querySelector(selector);
     const ui = {
       title: $('#title'), summary: $('#summary'), distance: $('#distance'),
@@ -525,6 +520,7 @@
     let speed = 1;
     let overlayCompleted = [];
     let view3dEnabled = false;
+    let tubeReady = false;
     const replayDuration = 50;
     const routeStore = { database: 'gpx-route-replay', store: 'routes', key: 'current' };
 
@@ -575,7 +571,7 @@
       formatTime(65) === '1:05' &&
       cleanFileName('sample_route.gpx') === 'Sample Route' &&
       samplePoints([0, 1, 2, 3, 4], 3).join() === '0,2,4' &&
-      [...ui.speed.options].map((option) => Number(option.value)).join() === '0.25,0.5,1,2,4' &&
+      [...ui.speed.options].map((option) => Number(option.value)).join() === '0.1,0.25,0.5,1,2,4' &&
       Math.abs(blendBearing(170, -170, .5) - 180) < .001,
       'Route helpers failed'
     );
@@ -600,7 +596,7 @@
       const context = routeOverlay.getContext('2d');
       context.setTransform(scale, 0, 0, scale, 0, 0);
       context.clearRect(0, 0, width, height);
-      if (!view3dEnabled || displayPoints.length < 2) return;
+      if (!view3dEnabled || tubeReady || displayPoints.length < 2) return;
 
       const trace = (list) => {
         context.beginPath();
@@ -624,6 +620,130 @@
       context.strokeStyle = '#e21d2f';
       context.lineWidth = 7;
       trace(overlayCompleted);
+    }
+
+    const routeTubeLayer = {
+      id: 'route-tube-3d',
+      type: 'custom',
+      renderingMode: '3d',
+      onAdd(layerMap, gl) {
+        this.map = layerMap;
+        if (!THREE) return;
+        this.camera = new THREE.Camera();
+        this.scene = new THREE.Scene();
+        this.scene.add(new THREE.HemisphereLight(0xffffff, 0x182019, 2.2));
+        const light = new THREE.DirectionalLight(0xffffff, 2.5);
+        light.position.set(-30, -40, 80);
+        this.scene.add(light);
+        this.renderer = new THREE.WebGLRenderer({ canvas: layerMap.getCanvas(), context: gl, antialias: true });
+        this.renderer.autoClear = false;
+      },
+      render(gl, args) {
+        if (!this.renderer || !this.transform || !view3dEnabled || !tubeReady) return;
+        const { x, y, z, scale } = this.transform;
+        const projection = new THREE.Matrix4().fromArray(args.defaultProjectionData.mainMatrix);
+        const model = new THREE.Matrix4()
+          .makeTranslation(x, y, z)
+          .scale(new THREE.Vector3(scale, -scale, scale));
+        this.camera.projectionMatrix = projection.multiply(model);
+        this.renderer.resetState();
+        this.renderer.render(this.scene, this.camera);
+      }
+    };
+
+    function clearTubeRoute() {
+      if (!routeTubeLayer.scene) return;
+      for (const key of ['fullMesh', 'completeMesh', 'runnerMesh']) {
+        const mesh = routeTubeLayer[key];
+        if (!mesh) continue;
+        routeTubeLayer.scene.remove(mesh);
+        mesh.geometry.dispose();
+        mesh.material.dispose();
+        routeTubeLayer[key] = null;
+      }
+      routeTubeLayer.curve = null;
+      tubeReady = false;
+    }
+
+    const tubeDrawCount = (indexCount, radialSegments, value) => {
+      if (value >= 1) return indexCount;
+      const faceStrip = radialSegments * 6;
+      return Math.floor(indexCount * clamp(value, 0, 1) / faceStrip) * faceStrip;
+    };
+    console.assert(
+      tubeDrawCount(600, 5, .5) === 300 && tubeDrawCount(600, 5, 1) === 600,
+      '3D tube progress failed'
+    );
+
+    function syncRouteLayerVisibility() {
+      if (!mapReady) return;
+      const showTube = view3dEnabled && tubeReady;
+      for (const id of ['route-shadow', 'route-base', 'route-complete']) {
+        if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', view3dEnabled ? 'none' : 'visible');
+      }
+      for (const id of ['runner-shadow', 'runner-dot']) {
+        if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', showTube ? 'none' : 'visible');
+      }
+      drawRouteOverlay();
+      map.triggerRepaint();
+    }
+
+    function setTubeProgress(value) {
+      if (!tubeReady) return;
+      const geometry = routeTubeLayer.completeMesh.geometry;
+      geometry.setDrawRange(0, tubeDrawCount(geometry.index.count, routeTubeLayer.radialSegments, value));
+      routeTubeLayer.runnerMesh.position.copy(routeTubeLayer.curve.getPointAt(clamp(value, 0, 1)));
+      if (view3dEnabled) map.triggerRepaint();
+    }
+
+    function buildTubeRoute(list, useTerrain = false) {
+      if (!routeTubeLayer.scene || list.length < 2) return;
+      clearTubeRoute();
+      const mobile = matchMedia('(max-width: 580px)').matches;
+      const route = samplePoints(list, mobile ? 320 : 640);
+      const altitude = (point) => {
+        const terrain = useTerrain ? map.queryTerrainElevation([point.lon, point.lat]) : null;
+        return (Number.isFinite(terrain) ? terrain : Number.isFinite(point.ele) ? point.ele : 0) + 8;
+      };
+      const origin = maplibregl.MercatorCoordinate.fromLngLat([route[0].lon, route[0].lat], altitude(route[0]));
+      const scale = origin.meterInMercatorCoordinateUnits();
+      const vectors = [];
+      for (const point of route) {
+        const coordinate = maplibregl.MercatorCoordinate.fromLngLat([point.lon, point.lat], altitude(point));
+        const vector = new THREE.Vector3(
+          (coordinate.x - origin.x) / scale,
+          -(coordinate.y - origin.y) / scale,
+          (coordinate.z - origin.z) / scale
+        );
+        if (!vectors.length || vector.distanceToSquared(vectors.at(-1)) > .01) vectors.push(vector);
+      }
+      if (vectors.length < 2) return;
+
+      const radialSegments = mobile ? 5 : 8;
+      const tubularSegments = Math.max(24, vectors.length - 1);
+      const curve = new THREE.CatmullRomCurve3(vectors, false, 'centripetal');
+      const fullMesh = new THREE.Mesh(
+        new THREE.TubeGeometry(curve, tubularSegments, 2.15, radialSegments, false),
+        new THREE.MeshStandardMaterial({ color: 0xe21d2f, transparent: true, opacity: .22, roughness: .7, depthWrite: false })
+      );
+      const completeMesh = new THREE.Mesh(
+        new THREE.TubeGeometry(curve, tubularSegments, 3, radialSegments, false),
+        new THREE.MeshStandardMaterial({ color: 0xe21d2f, emissive: 0x5f050d, emissiveIntensity: .65, roughness: .32, metalness: .12 })
+      );
+      const runnerMesh = new THREE.Mesh(
+        new THREE.SphereGeometry(4.5, mobile ? 10 : 14, mobile ? 6 : 9),
+        new THREE.MeshStandardMaterial({ color: 0xc9ff45, emissive: 0x668f00, emissiveIntensity: .7, roughness: .28 })
+      );
+      completeMesh.renderOrder = 1;
+      runnerMesh.renderOrder = 2;
+      routeTubeLayer.scene.add(fullMesh, completeMesh, runnerMesh);
+      Object.assign(routeTubeLayer, {
+        curve, fullMesh, completeMesh, runnerMesh, radialSegments,
+        transform: { x: origin.x, y: origin.y, z: origin.z, scale }
+      });
+      tubeReady = true;
+      setTubeProgress(totalDistance ? pointAt(progress).distance / totalDistance : progress);
+      syncRouteLayerVisibility();
     }
 
     function addMapLayers() {
@@ -677,6 +797,7 @@
       map.addLayer({ id: 'runner-dot', type: 'circle', source: 'runner', paint: {
         'circle-radius': 8, 'circle-color': '#c9ff45', 'circle-stroke-width': 3, 'circle-stroke-color': '#10150f'
       }});
+      if (THREE) map.addLayer(routeTubeLayer, firstSymbol);
     }
 
     const mapLoaded = new Promise((resolve) => {
@@ -741,10 +862,14 @@
       if (!mapReady) return;
 
       if (map.getLayer('3d-buildings')) map.setLayoutProperty('3d-buildings', 'visibility', enabled ? 'visible' : 'none');
-      for (const id of ['route-shadow', 'route-base', 'route-complete']) {
-        map.setLayoutProperty(id, 'visibility', enabled ? 'none' : 'visible');
+      if (!enabled && points.length) {
+        const current = pointAt(progress);
+        map.getSource('route-complete').setData(lineFeature(overlayCompleted));
+        map.getSource('runner').setData({
+          type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [current.lon, current.lat] }
+        });
       }
-      drawRouteOverlay();
+      syncRouteLayerVisibility();
 
       const camera = { pitch: enabled ? 50 : 0, bearing: enabled ? -18 : 0 };
       const moveCamera = () => {
@@ -755,7 +880,10 @@
       if (enabled) {
         map.jumpTo({ pitch: 0, bearing: 0 });
         map.setTerrain({ source: 'terrain-dem', exaggeration: 1 });
-        setTimeout(moveCamera, 3000);
+        setTimeout(() => {
+          moveCamera();
+          if (view3dEnabled && displayPoints.length) buildTubeRoute(displayPoints, true);
+        }, 3000);
       } else {
         map.setTerrain(null);
         moveCamera();
@@ -798,6 +926,7 @@
       setPlayState(false);
       progress = 0;
       lastFrame = 0;
+      overlayCompleted = [];
       mileageMarkers.forEach(({ marker }) => marker.remove());
       endpointMarkers.forEach((marker) => marker.remove());
       mileageMarkers = [];
@@ -815,6 +944,7 @@
       await mapLoaded;
 
       map.getSource('route-full').setData(lineFeature(displayPoints));
+      buildTubeRoute(displayPoints);
 
       for (let km = 1; km * 1000 <= totalDistance; km++) {
         const distance = km * 1000;
@@ -826,7 +956,10 @@
         const element = document.createElement('div');
         element.className = 'km-marker';
         const label = document.createElement('span');
-        label.textContent = `${km} km`;
+        const number = document.createElement('b');
+        number.textContent = String(km);
+        label.append(number);
+        element.setAttribute('aria-label', `${km} kilometre marker`);
         element.append(label);
         mileageMarkers.push({
           distance,
@@ -915,11 +1048,14 @@
       const completed = displayPoints.filter((point) => point.index <= current.index);
       completed.push(current);
       overlayCompleted = completed;
-      map.getSource('route-complete').setData(lineFeature(completed));
+      if (!view3dEnabled) map.getSource('route-complete').setData(lineFeature(completed));
       drawRouteOverlay();
-      map.getSource('runner').setData({
-        type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [current.lon, current.lat] }
-      });
+      setTubeProgress(totalDistance ? current.distance / totalDistance : progress);
+      if (!view3dEnabled || !tubeReady) {
+        map.getSource('runner').setData({
+          type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [current.lon, current.lat] }
+        });
+      }
       ui.progress.value = Math.round(progress * 1000);
       ui.distance.textContent = ui.compactDistance.textContent = `${(current.distance / 1000).toFixed(2)} km`;
       ui.elapsed.textContent = formatTime(progress * totalDuration);
