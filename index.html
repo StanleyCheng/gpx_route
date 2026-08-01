@@ -458,7 +458,6 @@
 
   <script src="https://unpkg.com/maplibre-gl@5.19.0/dist/maplibre-gl.js"></script>
   <script type="module">
-    const THREE = await import('https://unpkg.com/three@0.180.0/build/three.module.js').catch(() => null);
     const $ = (selector) => document.querySelector(selector);
     const ui = {
       title: $('#title'), summary: $('#summary'), distance: $('#distance'),
@@ -515,15 +514,11 @@
     let progress = 0;
     let lastFrame = 0;
     let followBearing = 0;
-    let followCamera = null;
-    let followCorrectionPending = false;
     let speed = 1;
-    let overlayCompleted = [];
+    let completedRoute = [];
     let overlayVisible = false;
     let view3dEnabled = false;
-    let tubeReady = false;
     const replayDuration = 50;
-    const tubeRadius = 6;
     const routeStore = { database: 'gpx-route-replay', store: 'routes', key: 'current' };
     const preferenceDefaultsVersion = '2';
 
@@ -565,28 +560,6 @@
       return current + delta * amount;
     };
 
-    const PolylineCurve3 = THREE ? class extends THREE.Curve {
-      constructor(curvePoints) {
-        super();
-        this.points = curvePoints;
-      }
-
-      getPoint(value, target = new THREE.Vector3()) {
-        const position = clamp(value, 0, 1) * (this.points.length - 1);
-        const index = Math.min(Math.floor(position), this.points.length - 2);
-        return target.copy(this.points[index]).lerp(this.points[index + 1], position - index);
-      }
-
-      getPointAt(value, target) { return this.getPoint(value, target); }
-
-      getTangentAt(value, target = new THREE.Vector3()) {
-        const halfStep = .5 / (this.points.length - 1);
-        const before = this.getPoint(value - halfStep);
-        const after = this.getPoint(value + halfStep);
-        return target.copy(after).sub(before).normalize();
-      }
-    } : null;
-
     console.assert(
       clamp(2, 0, 1) === 1 &&
       formatTime(65) === '1:05' &&
@@ -595,15 +568,6 @@
       Math.abs(blendBearing(170, -170, .5) - 180) < .001,
       'Route helpers failed'
     );
-    if (PolylineCurve3) {
-      const corner = new PolylineCurve3([
-        new THREE.Vector3(0, 0, 0),
-        new THREE.Vector3(1, 0, 0),
-        new THREE.Vector3(1, 1, 0)
-      ]).getPointAt(.5);
-      console.assert(corner.distanceTo(new THREE.Vector3(1, 0, 0)) < 1e-9, 'Polyline route alignment failed');
-    }
-
     function lineFeature(list) {
       if (list.length < 2) return emptyFeatureCollection();
       return {
@@ -614,8 +578,7 @@
     }
 
     function drawRouteOverlay() {
-      const shouldDraw = view3dEnabled && !tubeReady && displayPoints.length >= 2;
-      if (!shouldDraw && !overlayVisible) return;
+      if (!view3dEnabled && !overlayVisible) return;
       const width = routeOverlay.clientWidth;
       const height = routeOverlay.clientHeight;
       const scale = devicePixelRatio || 1;
@@ -626,171 +589,28 @@
       const context = routeOverlay.getContext('2d');
       context.setTransform(scale, 0, 0, scale, 0, 0);
       context.clearRect(0, 0, width, height);
-      overlayVisible = shouldDraw;
-      if (!shouldDraw) return;
+      overlayVisible = view3dEnabled && completedRoute.length > 1;
+      if (!overlayVisible) return;
 
-      const trace = (list) => {
-        context.beginPath();
-        list.forEach((point, index) => {
-          const projected = map.project([point.lon, point.lat]);
-          context[index ? 'lineTo' : 'moveTo'](projected.x, projected.y);
-        });
-        context.stroke();
-      };
+      context.beginPath();
+      for (const [index, point] of completedRoute.entries()) {
+        const projected = map.project([point.lon, point.lat]);
+        context[index ? 'lineTo' : 'moveTo'](projected.x, projected.y);
+      }
       context.lineCap = 'round';
       context.lineJoin = 'round';
-      context.strokeStyle = '#f0a3a9';
-      context.lineWidth = 5;
-      trace(displayPoints);
-      context.strokeStyle = 'rgba(226, 29, 47, .5)';
-      context.lineWidth = 15;
-      context.shadowColor = '#e21d2f';
-      context.shadowBlur = 8;
-      trace(overlayCompleted);
-      context.shadowBlur = 0;
       context.strokeStyle = '#e21d2f';
-      context.lineWidth = 7;
-      trace(overlayCompleted);
-    }
+      context.lineWidth = 6;
+      context.stroke();
 
-    const routeTubeLayer = {
-      id: 'route-tube-3d',
-      type: 'custom',
-      renderingMode: '3d',
-      onAdd(layerMap, gl) {
-        this.map = layerMap;
-        if (!THREE) return;
-        this.camera = new THREE.Camera();
-        this.scene = new THREE.Scene();
-        this.scene.add(new THREE.HemisphereLight(0xffffff, 0x182019, 2.2));
-        const light = new THREE.DirectionalLight(0xffffff, 2.5);
-        light.position.set(-30, -40, 80);
-        this.scene.add(light);
-        this.renderer = new THREE.WebGLRenderer({ canvas: layerMap.getCanvas(), context: gl, antialias: true });
-        this.renderer.autoClear = false;
-      },
-      render(gl, args) {
-        if (!this.renderer || !this.transform || !view3dEnabled || !tubeReady) return;
-        const { x, y, z, scale } = this.transform;
-        const projection = new THREE.Matrix4().fromArray(args.defaultProjectionData.mainMatrix);
-        const model = new THREE.Matrix4()
-          .makeTranslation(x, y, z)
-          .scale(new THREE.Vector3(scale, -scale, scale));
-        this.camera.projectionMatrix = projection.multiply(model);
-        this.renderer.resetState();
-        this.renderer.render(this.scene, this.camera);
-      }
-    };
-
-    function clearTubeRoute() {
-      if (!routeTubeLayer.scene) return;
-      for (const key of ['fullMesh', 'completeMesh', 'runnerMesh']) {
-        const mesh = routeTubeLayer[key];
-        if (!mesh) continue;
-        routeTubeLayer.scene.remove(mesh);
-        mesh.geometry.dispose();
-        mesh.material.dispose();
-        routeTubeLayer[key] = null;
-      }
-      routeTubeLayer.curve = null;
-      routeTubeLayer.pointIndexes = null;
-      tubeReady = false;
-    }
-
-    const tubeDrawCount = (indexCount, radialSegments, value) => {
-      if (value >= 1) return indexCount;
-      const faceStrip = radialSegments * 6;
-      return Math.floor(indexCount * clamp(value, 0, 1) / faceStrip) * faceStrip;
-    };
-    const screenCenterOffset = (tip, width, height) => [
-      clamp(-tip.x * width / 2, -width / 3, width / 3),
-      clamp(tip.y * height / 2, -height / 3, height / 3)
-    ];
-    console.assert(
-      tubeDrawCount(600, 5, .5) === 300 &&
-      tubeDrawCount(600, 5, 1) === 600 &&
-      screenCenterOffset({ x: .5, y: -.5 }, 300, 600).join() === '-75,-150',
-      '3D route helpers failed'
-    );
-
-    function syncRouteLayerVisibility() {
-      if (!mapReady) return;
-      const showTube = view3dEnabled && tubeReady;
-      for (const id of ['route-shadow', 'route-base', 'route-complete']) {
-        if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', view3dEnabled ? 'none' : 'visible');
-      }
-      for (const id of ['runner-shadow', 'runner-dot']) {
-        if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', showTube ? 'none' : 'visible');
-      }
-      drawRouteOverlay();
-      map.triggerRepaint();
-    }
-
-    function setTubeProgress(value) {
-      if (!tubeReady) return;
-      const geometry = routeTubeLayer.completeMesh.geometry;
-      geometry.setDrawRange(0, tubeDrawCount(geometry.index.count, routeTubeLayer.radialSegments, value));
-      routeTubeLayer.runnerMesh.position.copy(routeTubeLayer.curve.getPointAt(clamp(value, 0, 1)));
-      if (view3dEnabled) map.triggerRepaint();
-    }
-
-    function tubeProgressAt(current) {
-      if (!tubeReady) return progress;
-      const start = routeTubeLayer.pointIndexes[current.index] ?? 0;
-      const end = routeTubeLayer.pointIndexes[current.index + 1] ?? start;
-      return (start + (end - start) * current.mix) / (routeTubeLayer.curve.points.length - 1);
-    }
-
-    function buildTubeRoute(list, useTerrain = false) {
-      if (!routeTubeLayer.scene || list.length < 2) return;
-      clearTubeRoute();
-      const mobile = matchMedia('(max-width: 580px)').matches;
-      const route = list;
-      const altitude = (point) => {
-        const terrain = useTerrain ? map.queryTerrainElevation([point.lon, point.lat]) : null;
-        return (Number.isFinite(terrain) ? terrain : Number.isFinite(point.ele) ? point.ele : 0) + tubeRadius;
-      };
-      const origin = maplibregl.MercatorCoordinate.fromLngLat([route[0].lon, route[0].lat], altitude(route[0]));
-      const scale = origin.meterInMercatorCoordinateUnits();
-      const vectors = [];
-      const pointIndexes = [];
-      for (const point of route) {
-        const coordinate = maplibregl.MercatorCoordinate.fromLngLat([point.lon, point.lat], altitude(point));
-        const vector = new THREE.Vector3(
-          (coordinate.x - origin.x) / scale,
-          -(coordinate.y - origin.y) / scale,
-          (coordinate.z - origin.z) / scale
-        );
-        if (!vectors.length || vector.distanceToSquared(vectors.at(-1)) > 1e-8) vectors.push(vector);
-        pointIndexes[point.index] = vectors.length - 1;
-      }
-      if (vectors.length < 2) return;
-
-      const radialSegments = mobile ? 5 : 8;
-      const tubularSegments = vectors.length - 1;
-      const curve = new PolylineCurve3(vectors);
-      const fullMesh = new THREE.Mesh(
-        new THREE.TubeGeometry(curve, tubularSegments, tubeRadius, radialSegments, false),
-        new THREE.MeshStandardMaterial({ color: 0xe21d2f, transparent: true, opacity: .16, roughness: .7, depthWrite: false })
-      );
-      const completeMesh = new THREE.Mesh(
-        new THREE.TubeGeometry(curve, tubularSegments, tubeRadius, radialSegments, false),
-        new THREE.MeshStandardMaterial({ color: 0xe21d2f, emissive: 0x5f050d, emissiveIntensity: .65, roughness: .32, metalness: .12 })
-      );
-      const runnerMesh = new THREE.Mesh(
-        new THREE.SphereGeometry(9, mobile ? 10 : 14, mobile ? 6 : 9),
-        new THREE.MeshStandardMaterial({ color: 0xc9ff45, emissive: 0x668f00, emissiveIntensity: .7, roughness: .28 })
-      );
-      completeMesh.renderOrder = 1;
-      runnerMesh.renderOrder = 2;
-      routeTubeLayer.scene.add(fullMesh, completeMesh, runnerMesh);
-      Object.assign(routeTubeLayer, {
-        curve, fullMesh, completeMesh, runnerMesh, radialSegments, pointIndexes,
-        transform: { x: origin.x, y: origin.y, z: origin.z, scale }
-      });
-      tubeReady = true;
-      setTubeProgress(tubeProgressAt(pointAt(progress)));
-      syncRouteLayerVisibility();
+      const tip = map.project([completedRoute.at(-1).lon, completedRoute.at(-1).lat]);
+      context.beginPath();
+      context.arc(tip.x, tip.y, 8, 0, Math.PI * 2);
+      context.fillStyle = '#c9ff45';
+      context.fill();
+      context.lineWidth = 3;
+      context.strokeStyle = '#10150f';
+      context.stroke();
     }
 
     function addMapLayers() {
@@ -805,7 +625,6 @@
         maxzoom: 15,
         encoding: 'terrarium'
       });
-      map.addSource('route-full', { type: 'geojson', data: emptyFeatureCollection(), tolerance: 0 });
       map.addSource('route-complete', { type: 'geojson', data: emptyFeatureCollection(), tolerance: 0 });
       map.addSource('runner', { type: 'geojson', data: emptyFeatureCollection() });
 
@@ -829,14 +648,8 @@
         }, firstSymbol);
       }
 
-      map.addLayer({ id: 'route-shadow', type: 'line', source: 'route-complete', paint: {
-        'line-color': '#e21d2f', 'line-width': 15, 'line-opacity': .38, 'line-blur': 4
-      }}, firstSymbol);
-      map.addLayer({ id: 'route-base', type: 'line', source: 'route-full', paint: {
-        'line-color': '#f0a3a9', 'line-width': 5, 'line-opacity': .9
-      }, layout: { 'line-cap': 'round', 'line-join': 'round' }}, firstSymbol);
       map.addLayer({ id: 'route-complete', type: 'line', source: 'route-complete', paint: {
-        'line-color': '#e21d2f', 'line-width': 7, 'line-opacity': 1
+        'line-color': '#e21d2f', 'line-width': 6, 'line-opacity': 1
       }, layout: { 'line-cap': 'round', 'line-join': 'round' }}, firstSymbol);
       map.addLayer({ id: 'runner-shadow', type: 'circle', source: 'runner', paint: {
         'circle-radius': 12, 'circle-color': '#10150f', 'circle-opacity': .34, 'circle-blur': .35
@@ -844,7 +657,6 @@
       map.addLayer({ id: 'runner-dot', type: 'circle', source: 'runner', paint: {
         'circle-radius': 8, 'circle-color': '#c9ff45', 'circle-stroke-width': 3, 'circle-stroke-color': '#10150f'
       }});
-      if (THREE) map.addLayer(routeTubeLayer, firstSymbol);
     }
 
     const mapLoaded = new Promise((resolve) => {
@@ -909,14 +721,6 @@
       if (!mapReady) return;
 
       if (map.getLayer('3d-buildings')) map.setLayoutProperty('3d-buildings', 'visibility', enabled ? 'visible' : 'none');
-      if (!enabled && points.length) {
-        const current = pointAt(progress);
-        map.getSource('route-complete').setData(lineFeature(overlayCompleted));
-        map.getSource('runner').setData({
-          type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [current.lon, current.lat] }
-        });
-      }
-      syncRouteLayerVisibility();
 
       const camera = { pitch: enabled ? 50 : 0, bearing: enabled ? -18 : 0 };
       const moveCamera = () => {
@@ -929,10 +733,7 @@
         const enableTerrain = () => {
           if (!view3dEnabled) return;
           map.setTerrain({ source: 'terrain-dem', exaggeration: 1 });
-          setTimeout(() => {
-            moveCamera();
-            if (view3dEnabled && displayPoints.length) buildTubeRoute(displayPoints, true);
-          }, 3000);
+          moveCamera();
         };
         if (animate) enableTerrain();
         else {
@@ -943,6 +744,7 @@
         map.setTerrain(null);
         moveCamera();
       }
+      drawRouteOverlay();
       setStatus(enabled ? '3D terrain enabled.' : '2D map enabled.');
     }
 
@@ -981,7 +783,7 @@
       setPlayState(false);
       progress = 0;
       lastFrame = 0;
-      overlayCompleted = [];
+      completedRoute = [];
       mileageMarkers.forEach(({ marker }) => marker.remove());
       endpointMarkers.forEach((marker) => marker.remove());
       mileageMarkers = [];
@@ -997,9 +799,6 @@
       }
       totalDistance = cumulativeDistance.at(-1);
       await mapLoaded;
-
-      map.getSource('route-full').setData(lineFeature(displayPoints));
-      buildTubeRoute(displayPoints);
 
       for (let km = 1; km * 1000 <= totalDistance; km++) {
         const distance = km * 1000;
@@ -1093,42 +892,19 @@
         pitch: view3dEnabled ? 50 : 0,
         zoom: Math.max(map.getZoom(), view3dEnabled ? 15.3 : 14.5)
       };
-      followCamera = camera;
       map.jumpTo(camera);
-      if (!view3dEnabled || !tubeReady || !routeTubeLayer.camera?.projectionMatrix) {
-        return;
-      }
-      if (followCorrectionPending) return;
-      followCorrectionPending = true;
-      map.once('render', () => {
-        followCorrectionPending = false;
-        if (!ui.followToggle.checked || !view3dEnabled || !tubeReady) return;
-        const tip = routeTubeLayer.runnerMesh.position.clone().applyMatrix4(routeTubeLayer.camera.projectionMatrix);
-        const width = map.getCanvas().clientWidth;
-        const height = map.getCanvas().clientHeight;
-        map.easeTo({
-          ...followCamera,
-          offset: screenCenterOffset(tip, width, height),
-          duration: 0
-        });
-        map.triggerRepaint();
-      });
     }
 
     function render(nextProgress) {
       progress = clamp(nextProgress, 0, 1);
       const current = pointAt(progress);
-      const completed = displayPoints.filter((point) => point.index <= current.index);
+      const completed = displayPoints.slice(0, current.index + 1);
       completed.push(current);
-      overlayCompleted = completed;
-      if (!view3dEnabled) map.getSource('route-complete').setData(lineFeature(completed));
-      drawRouteOverlay();
-      setTubeProgress(tubeProgressAt(current));
-      if (!view3dEnabled || !tubeReady) {
-        map.getSource('runner').setData({
-          type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [current.lon, current.lat] }
-        });
-      }
+      completedRoute = completed;
+      map.getSource('route-complete').setData(lineFeature(completedRoute));
+      map.getSource('runner').setData({
+        type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [current.lon, current.lat] }
+      });
       ui.progress.value = Math.round(progress * 1000);
       ui.distance.textContent = ui.compactDistance.textContent = `${(current.distance / 1000).toFixed(2)} km`;
       ui.elapsed.textContent = formatTime(progress * totalDuration);
@@ -1136,6 +912,7 @@
       ui.heartRate.textContent = Number.isFinite(current.hr) ? `${current.hr} bpm` : '—';
       updateMileageMarkers(current.distance);
       updateFollowCamera(current);
+      drawRouteOverlay();
     }
 
     function frame(timestamp) {
