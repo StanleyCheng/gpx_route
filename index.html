@@ -60,8 +60,30 @@
       border-radius: 16px;
       background: rgba(15, 20, 18, .3);
       backdrop-filter: blur(10px);
-      pointer-events: none;
+      transition: width .2s, padding .2s;
     }
+
+    .topbar-details { min-width: 0; overflow: hidden; padding-right: 38px; }
+    .topbar-toggle {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      display: grid;
+      width: 30px;
+      height: 30px;
+      place-items: center;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(15, 20, 18, .28);
+      color: var(--muted);
+      cursor: pointer;
+      list-style: none;
+    }
+    .topbar-toggle::-webkit-details-marker { display: none; }
+    .topbar-toggle::before { content: '−'; }
+    .topbar:not([open]) { width: 44px; height: 44px; padding: 0; border-radius: 13px; }
+    .topbar:not([open]) .topbar-toggle { inset: 0; width: 42px; height: 42px; border: 0; background: transparent; }
+    .topbar:not([open]) .topbar-toggle::before { content: '+'; }
 
     .eyebrow {
       margin: 1px 0 5px;
@@ -82,7 +104,17 @@
       white-space: nowrap;
     }
 
-    .summary { margin: 9px 0 0; color: rgba(244, 247, 245, .76); font-size: 13px; }
+    .summary {
+      display: flex;
+      gap: 12px;
+      margin: 7px 0 0;
+      overflow: hidden;
+      color: rgba(244, 247, 245, .72);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .summary strong { color: var(--ink); font-variant-numeric: tabular-nums; font-weight: 750; }
 
     .control-panel {
       position: fixed;
@@ -332,7 +364,7 @@
       }
 
       h1 { font-size: 24px; }
-      .summary { display: none; }
+      .summary { gap: 9px; margin-top: 6px; font-size: 9px; }
       .control-panel {
         right: max(10px, env(safe-area-inset-right));
         bottom: max(10px, env(safe-area-inset-bottom));
@@ -379,11 +411,14 @@
   <div id="map" aria-label="Animated GPX or FIT route map"></div>
   <div class="shade"></div>
 
-  <header class="topbar">
-    <p class="eyebrow">Route replay</p>
-    <h1 id="title">GPX/FIT Route Replay</h1>
-    <p class="summary" id="summary">Choose a GPX or FIT file to begin</p>
-  </header>
+  <details class="topbar" open>
+    <summary class="topbar-toggle" aria-label="Show or hide route title"></summary>
+    <div class="topbar-details" id="topbar-details">
+      <p class="eyebrow">Route replay</p>
+      <h1 id="title">GPX/FIT Route Replay</h1>
+      <p class="summary"><span>Total distance <strong id="total-distance">—</strong></span><span>Avg pace <strong id="average-pace">—</strong></span></p>
+    </div>
+  </details>
 
   <section class="empty-state" id="empty-state">
     <h2>Open a route from your iPhone</h2>
@@ -461,7 +496,8 @@
   <script type="module">
     const $ = (selector) => document.querySelector(selector);
     const ui = {
-      title: $('#title'), summary: $('#summary'), distance: $('#distance'),
+      title: $('#title'), totalDistance: $('#total-distance'), averagePace: $('#average-pace'),
+      distance: $('#distance'),
       elapsed: $('#elapsed'), elevation: $('#elevation'), heartRate: $('#heart-rate'),
       compactDistance: $('#compact-distance'), playButtons: [...document.querySelectorAll('[data-play]')],
       restart: $('#restart'), progress: $('#progress'), speed: $('#speed'),
@@ -529,6 +565,11 @@
       try { localStorage.setItem(key, String(value)); } catch {}
     };
     const formatTime = (seconds) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
+    const formatPace = (seconds) => {
+      if (!Number.isFinite(seconds) || seconds <= 0) return '—';
+      const rounded = Math.round(seconds);
+      return `${Math.floor(rounded / 60)}:${String(rounded % 60).padStart(2, '0')}/km`;
+    };
     const cleanFileName = (fileName) => fileName
       .replace(/\.[^.]+$/, '')
       .replace(/[_-]+/g, ' ')
@@ -556,6 +597,7 @@
     console.assert(
       clamp(2, 0, 1) === 1 &&
       formatTime(65) === '1:05' &&
+      formatPace(355.4) === '5:55/km' &&
       cleanFileName('sample_route.gpx') === 'Sample Route' &&
       ui.speed.value === '0.05' &&
       [...ui.speed.options].map((option) => Number(option.value)).join() === '0.05,0.1,0.5,1,2' &&
@@ -897,7 +939,8 @@
 
       fitRouteOverview();
       setViewMode(view3dEnabled, false);
-      ui.summary.textContent = `${(totalDistance / 1000).toFixed(2)} km · ${formatTime(totalDuration)} · ${points.length}/${track.rawPointCount} track points · ${track.removedPoints} filtered`;
+      ui.totalDistance.textContent = `${(totalDistance / 1000).toFixed(2)} km`;
+      ui.averagePace.textContent = formatPace(totalDuration / (totalDistance / 1000));
       ui.emptyState.hidden = true;
       setStatus(`${ui.title.textContent} loaded from this device. ${track.removedPoints} GPS points faster than ${MAX_ALLOWED_SPEED_KILOMETERS_PER_HOUR} km/h were filtered.`);
       render(0);
