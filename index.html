@@ -364,7 +364,7 @@
       }
 
       h1 { font-size: 24px; }
-      .summary { gap: 9px; margin-top: 6px; font-size: 9px; }
+      .summary { gap: 4px; margin-top: 6px; font-size: 8.25px; }
       .control-panel {
         right: max(10px, env(safe-area-inset-right));
         bottom: max(10px, env(safe-area-inset-bottom));
@@ -393,6 +393,7 @@
     }
 
     @media (max-width: 390px) {
+      .summary { gap: 3px; font-size: 7.5px; }
       .secondary-controls { grid-template-columns: 1fr; }
       .secondary-controls .import-button { width: 100%; }
     }
@@ -416,7 +417,7 @@
     <div class="topbar-details" id="topbar-details">
       <p class="eyebrow">Route replay</p>
       <h1 id="title">GPX/FIT Route Replay</h1>
-      <p class="summary"><span>Total distance <strong id="total-distance">—</strong></span><span>Avg pace <strong id="average-pace">—</strong></span></p>
+      <p class="summary"><span>Distance <strong id="total-distance">—</strong></span><span>Start <strong id="start-time">—</strong></span><span>Avg pace <strong id="average-pace">—</strong></span></p>
     </div>
   </details>
 
@@ -497,7 +498,7 @@
   <script type="module">
     const $ = (selector) => document.querySelector(selector);
     const ui = {
-      title: $('#title'), totalDistance: $('#total-distance'), averagePace: $('#average-pace'),
+      title: $('#title'), totalDistance: $('#total-distance'), startTime: $('#start-time'), averagePace: $('#average-pace'),
       distance: $('#distance'),
       elapsed: $('#elapsed'), elevation: $('#elevation'), heartRate: $('#heart-rate'),
       compactDistance: $('#compact-distance'), playButtons: [...document.querySelectorAll('[data-play]')],
@@ -536,7 +537,6 @@
       }
     });
 
-    map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
     const routeOverlay = document.createElement('canvas');
     routeOverlay.className = 'route-overlay';
     map.getContainer().append(routeOverlay);
@@ -575,6 +575,12 @@
       const rounded = Math.round(seconds);
       return `${Math.floor(rounded / 60)}:${String(rounded % 60).padStart(2, '0')}/km`;
     };
+    const formatStartTime = (timestamp) => {
+      const date = new Date(timestamp);
+      if (!Number.isFinite(date.getTime())) return '—';
+      const pad = (part) => String(part).padStart(2, '0');
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    };
     const cleanFileName = (fileName) => fileName
       .replace(/\.[^.]+$/, '')
       .replace(/[_-]+/g, ' ')
@@ -603,6 +609,7 @@
       clamp(2, 0, 1) === 1 &&
       formatTime(3299) === '00:54:59' &&
       formatPace(355.4) === '5:55/km' &&
+      formatStartTime(new Date(2026, 6, 27, 11, 1).getTime()) === '2026-07-27 11:01' &&
       cleanFileName('sample_route.gpx') === 'Sample Route' &&
       ui.speed.value === '1' &&
       [...ui.speed.options].map((option) => Number(option.value)).join() === '0.05,0.1,0.5,1,2,4' &&
@@ -945,6 +952,7 @@
       fitRouteOverview();
       setViewMode(view3dEnabled, false);
       ui.totalDistance.textContent = `${(totalDistance / 1000).toFixed(2)} km`;
+      ui.startTime.textContent = formatStartTime(track.startTime);
       ui.averagePace.textContent = formatPace(totalDuration / (totalDistance / 1000));
       ui.emptyState.hidden = true;
       setStatus(`${ui.title.textContent} loaded from this device. ${track.removedPoints} GPS points faster than ${MAX_ALLOWED_SPEED_KILOMETERS_PER_HOUR} km/h were filtered.`);

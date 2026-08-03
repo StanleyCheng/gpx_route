@@ -24,6 +24,7 @@ const normalized = normalizePointTimes([
   { ...recovery, time: 5000 }
 ]);
 assert.deepEqual(normalized.map((point) => point.time), [4000, 5000, 6000]);
+assert.equal(prepareTrack([start, recovery]).startTime, 0);
 assert.equal(prepareTrack([start, recovery]).rawPointCount, 2);
 
 console.log('Route filtering tests passed.');

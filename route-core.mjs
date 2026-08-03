@@ -58,8 +58,10 @@ export function prepareTrack(rawPoints) {
   if (filtered.points.length < 2) {
     throw new Error('The route needs at least two usable track points after GPS spike filtering.');
   }
+  const startTime = Number(filtered.points.find((point) => Number.isFinite(Number(point.time)))?.time);
   return {
     points: normalizePointTimes(filtered.points),
+    startTime: Number.isFinite(startTime) ? startTime : null,
     rawPointCount: rawPoints.length,
     removedPoints: filtered.removedPoints
   };
