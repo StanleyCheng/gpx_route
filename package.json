@@ -3,6 +3,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node build.mjs"
+    "build": "node build.mjs",
+    "test": "node route-core.test.mjs"
+  },
+  "dependencies": {
+    "@garmin/fitsdk": "^21.208.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.9"
   }
 }

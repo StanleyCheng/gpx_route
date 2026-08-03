@@ -1,11 +1,37 @@
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { build } from 'esbuild';
 
-const html = await readFile('index.html', 'utf8');
+const bundle = async (options) => {
+  const result = await build({
+    bundle: true,
+    format: 'iife',
+    minify: true,
+    target: ['safari16.4'],
+    write: false,
+    ...options
+  });
+  return result.outputFiles[0].text.replaceAll('</script', '<\\/script');
+};
+
+const fitSdkBundle = await bundle({
+  stdin: {
+    contents: "export { Decoder, Stream, Utils } from '@garmin/fitsdk';",
+    resolveDir: process.cwd()
+  },
+  format: 'esm'
+});
+const routeCoreBundle = await bundle({
+  entryPoints: ['route-core.mjs'],
+  globalName: 'RouteCore'
+});
+const html = (await readFile('index.html', 'utf8'))
+  .replace('__ROUTE_CORE_BUNDLE__', routeCoreBundle);
 const socialImage = (await readFile('public/og.png')).toString('base64');
 const faviconImage = (await readFile('public/favicon.png')).toString('base64');
 const appleTouchIcon = (await readFile('public/apple-touch-icon.png')).toString('base64');
 const worker = `
 const html = ${JSON.stringify(html)};
+const fitSdkBundle = ${JSON.stringify(fitSdkBundle)};
 const socialImage = Uint8Array.from(atob(${JSON.stringify(socialImage)}), character => character.charCodeAt(0));
 const faviconImage = Uint8Array.from(atob(${JSON.stringify(faviconImage)}), character => character.charCodeAt(0));
 const appleTouchIcon = Uint8Array.from(atob(${JSON.stringify(appleTouchIcon)}), character => character.charCodeAt(0));
@@ -13,6 +39,11 @@ const appleTouchIcon = Uint8Array.from(atob(${JSON.stringify(appleTouchIcon)}), 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname === '/fit-sdk.js') {
+      return new Response(fitSdkBundle, {
+        headers: { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'public, max-age=604800' }
+      });
+    }
     if (url.pathname === '/og.png') {
       return new Response(socialImage, {
         headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' }

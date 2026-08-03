@@ -4,11 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111815">
-  <meta property="og:title" content="GPX Route Replay">
-  <meta property="og:description" content="Open a GPX file on your device and replay the route on a 2D or 3D animated map.">
+  <meta property="og:title" content="GPX/FIT Route Replay">
+  <meta property="og:description" content="Open a GPX or Garmin FIT activity file on your device and replay the filtered route on a 2D or 3D animated map.">
   <meta property="og:image" content="__SITE_ORIGIN__/og.png">
   <meta name="twitter:card" content="summary_large_image">
-  <title>GPX Route Replay</title>
+  <title>GPX/FIT Route Replay</title>
   <link rel="icon" type="image/png" sizes="192x192" href="/favicon.png?v=1">
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=1">
   <link rel="preconnect" href="https://api.maptiler.com">
@@ -376,21 +376,21 @@
   </style>
 </head>
 <body>
-  <div id="map" aria-label="Animated GPX route map"></div>
+  <div id="map" aria-label="Animated GPX or FIT route map"></div>
   <div class="shade"></div>
 
   <header class="topbar">
     <p class="eyebrow">Route replay</p>
-    <h1 id="title">GPX Route Replay</h1>
-    <p class="summary" id="summary">Choose a GPX file to begin</p>
+    <h1 id="title">GPX/FIT Route Replay</h1>
+    <p class="summary" id="summary">Choose a GPX or FIT file to begin</p>
   </header>
 
   <section class="empty-state" id="empty-state">
     <h2>Open a route from your iPhone</h2>
-    <p>Select a GPX file from Files or iCloud Drive. Your route stays in this browser and is never uploaded.</p>
+    <p>Select a GPX or Garmin activity FIT file from Files or iCloud Drive. Your route stays in this browser and is never uploaded.</p>
     <label class="import-button">
-      Choose GPX
-      <input class="gpx-input" type="file" accept=".gpx,application/gpx+xml,application/xml,text/xml">
+      Choose GPX/FIT
+      <input class="gpx-input" type="file" accept=".gpx,.fit,application/gpx+xml,application/xml,text/xml,application/octet-stream">
     </label>
     <small class="empty-note">The last selected route will reopen on this device.</small>
   </section>
@@ -439,8 +439,8 @@
             </label>
           </div>
           <label class="import-button">
-            Choose GPX
-            <input class="gpx-input" type="file" accept=".gpx,application/gpx+xml,application/xml,text/xml">
+            Choose GPX/FIT
+            <input class="gpx-input" type="file" accept=".gpx,.fit,application/gpx+xml,application/xml,text/xml,application/octet-stream">
           </label>
         </div>
       </section>
@@ -457,6 +457,7 @@
   <p class="status" id="status" aria-live="polite"></p>
 
   <script src="https://unpkg.com/maplibre-gl@5.19.0/dist/maplibre-gl.js"></script>
+  <script>__ROUTE_CORE_BUNDLE__</script>
   <script type="module">
     const $ = (selector) => document.querySelector(selector);
     const ui = {
@@ -473,6 +474,7 @@
     const mapTilerKey = '__MAPTILER_KEY__';
     const hasMapTilerKey = mapTilerKey && !mapTilerKey.startsWith('__');
     const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const { haversine, prepareTrack } = RouteCore;
     const emptyFeatureCollection = () => ({ type: 'FeatureCollection', features: [] });
     const mapStyle = hasMapTilerKey
       ? 'https://api.maptiler.com/maps/streets-v2/style.json'
@@ -532,16 +534,7 @@
       .replace(/[_-]+/g, ' ')
       .replace(/\s+/g, ' ')
       .trim()
-      .replace(/\b\w/g, (letter) => letter.toUpperCase()) || 'GPX Route';
-
-    const haversine = (a, b) => {
-      const toRad = Math.PI / 180;
-      const dLat = (b.lat - a.lat) * toRad;
-      const dLon = (b.lon - a.lon) * toRad;
-      const x = Math.sin(dLat / 2) ** 2 +
-        Math.cos(a.lat * toRad) * Math.cos(b.lat * toRad) * Math.sin(dLon / 2) ** 2;
-      return 12742000 * Math.asin(Math.sqrt(x));
-    };
+      .replace(/\b\w/g, (letter) => letter.toUpperCase()) || 'Route';
 
     const bearingBetween = (a, b) => {
       const toRad = Math.PI / 180;
@@ -696,11 +689,11 @@
       });
     }
 
-    async function saveRoute(fileName, xmlText) {
+    async function saveRoute(fileName, format, data) {
       const database = await openRouteDatabase();
       await new Promise((resolve, reject) => {
         const transaction = database.transaction(routeStore.store, 'readwrite');
-        transaction.objectStore(routeStore.store).put({ fileName, xmlText }, routeStore.key);
+        transaction.objectStore(routeStore.store).put({ fileName, format, data }, routeStore.key);
         transaction.oncomplete = resolve;
         transaction.onerror = () => reject(transaction.error);
       });
@@ -787,11 +780,53 @@
       }).filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lon));
 
       if (trackPoints.length < 2) throw new Error('The GPX file needs at least two track points.');
-      const fallbackStart = trackPoints.find((point) => Number.isFinite(point.time))?.time ?? 0;
-      trackPoints.forEach((point, index) => {
-        if (!Number.isFinite(point.time)) point.time = fallbackStart + index * 1000;
-      });
-      return { points: trackPoints };
+      return prepareTrack(trackPoints);
+    }
+
+    let fitSdkPromise;
+    const loadFitSdk = () => fitSdkPromise ??= import('/fit-sdk.js');
+
+    async function parseFit(arrayBuffer) {
+      const FitSdk = await loadFitSdk();
+      const stream = FitSdk.Stream.fromArrayBuffer(arrayBuffer);
+      const decoder = new FitSdk.Decoder(stream);
+      if (!decoder.isFIT()) throw new Error('The selected file does not have a valid FIT header.');
+
+      const { messages, errors } = decoder.read();
+      if (errors.length) throw new Error(`The FIT activity could not be decoded: ${errors[0].message}`);
+      if (messages.fileIdMesgs?.[0]?.type !== 'activity') {
+        throw new Error('Choose a Garmin activity FIT file containing recorded GPS points.');
+      }
+
+      const semicirclesToDegrees = 180 / (2 ** 31);
+      const fitTimestamp = (value) => {
+        if (value instanceof Date) return value.getTime();
+        const timestamp = Number(value);
+        return Number.isFinite(timestamp) ? timestamp * 1000 + FitSdk.Utils.FIT_EPOCH_MS : Number.NaN;
+      };
+      const trackPoints = (messages.recordMesgs ?? []).map((record, index) => ({
+        lat: Number(record.positionLat) * semicirclesToDegrees,
+        lon: Number(record.positionLong) * semicirclesToDegrees,
+        ele: Number(record.enhancedAltitude ?? record.altitude),
+        time: fitTimestamp(record.timestamp),
+        hr: Number(record.heartRate),
+        index
+      })).filter((point) =>
+        Number.isFinite(point.lat) && point.lat >= -90 && point.lat <= 90 &&
+        Number.isFinite(point.lon) && point.lon >= -180 && point.lon <= 180
+      );
+
+      if (trackPoints.length < 2) throw new Error('The FIT activity needs at least two recorded GPS points.');
+      return prepareTrack(trackPoints);
+    }
+
+    const routeFormat = (fileName) => fileName.toLowerCase().endsWith('.fit') ? 'fit' :
+      fileName.toLowerCase().endsWith('.gpx') ? 'gpx' : null;
+
+    async function parseRouteData(format, data) {
+      if (format === 'fit') return parseFit(data);
+      if (format === 'gpx') return parseGpx(data);
+      throw new Error('Choose a GPX or Garmin activity FIT file.');
     }
 
     function makeMarker(label, point, className = '') {
@@ -862,9 +897,9 @@
 
       fitRouteOverview();
       setViewMode(view3dEnabled, false);
-      ui.summary.textContent = `${(totalDistance / 1000).toFixed(2)} km · ${formatTime(totalDuration)} · ${points.length} track points`;
+      ui.summary.textContent = `${(totalDistance / 1000).toFixed(2)} km · ${formatTime(totalDuration)} · ${points.length}/${track.rawPointCount} track points · ${track.removedPoints} filtered`;
       ui.emptyState.hidden = true;
-      setStatus(`${ui.title.textContent} loaded from this device.`);
+      setStatus(`${ui.title.textContent} loaded from this device. ${track.removedPoints} GPS points faster than 3:30/km were filtered.`);
       render(0);
     }
 
@@ -1010,16 +1045,19 @@
       });
     }
 
-    async function importGpx(file) {
+    async function importRoute(file) {
       if (!file) return;
       try {
-        const xmlText = await file.text();
-        await setup(parseGpx(xmlText), file.name);
+        const format = routeFormat(file.name);
+        if (!format) throw new Error('Choose a file ending in .gpx or .fit.');
+        const data = format === 'fit' ? await file.arrayBuffer() : await file.text();
+        const track = await parseRouteData(format, data);
+        await setup(track, file.name);
         try {
-          await saveRoute(file.name, xmlText);
-          setStatus(`${cleanFileName(file.name)} loaded and saved on this device.`);
+          await saveRoute(file.name, format, data);
+          setStatus(`${cleanFileName(file.name)} loaded and saved on this device. ${track.removedPoints} GPS points faster than 3:30/km were filtered.`);
         } catch {
-          setStatus(`${cleanFileName(file.name)} loaded. Private browsing prevented local saving.`);
+          setStatus(`${cleanFileName(file.name)} loaded. ${track.removedPoints} GPS points were filtered; private browsing prevented local saving.`);
         }
       } catch (error) {
         ui.emptyState.hidden = false;
@@ -1030,7 +1068,7 @@
 
     for (const input of ui.fileInputs) {
       input.addEventListener('change', async (event) => {
-        await importGpx(event.target.files[0]);
+        await importRoute(event.target.files[0]);
         for (const otherInput of ui.fileInputs) otherInput.value = '';
       });
     }
@@ -1060,10 +1098,13 @@
     view3dEnabled = ui.view3dToggle.checked;
 
     readSavedRoute()
-      .then((saved) => saved
-        ? setup(parseGpx(saved.xmlText), saved.fileName)
-        : mapLoaded.then(() => setViewMode(view3dEnabled, false)))
-      .catch(() => setStatus('Choose a GPX file to begin.'));
+      .then((saved) => {
+        if (!saved) return mapLoaded.then(() => setViewMode(view3dEnabled, false));
+        const format = saved.format ?? 'gpx';
+        const data = saved.data ?? saved.xmlText;
+        return parseRouteData(format, data).then((track) => setup(track, saved.fileName));
+      })
+      .catch(() => setStatus('Choose a GPX or FIT file to begin.'));
   </script>
 </body>
 </html>
