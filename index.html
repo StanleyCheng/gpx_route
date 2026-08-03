@@ -349,14 +349,14 @@
       .secondary-controls {
         grid-column: 1 / -1;
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 96px;
+        grid-template-columns: minmax(0, 1fr) 106px;
         gap: 10px;
         margin-top: 6px;
       }
 
       .toggle-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 5px; }
       .marker-toggle { min-width: 0; font-size: 9px; }
-      .secondary-controls .import-button { width: 96px; height: 38px; padding: 0 7px; }
+      .secondary-controls .import-button { width: 106px; height: 38px; padding: 0 7px; }
       .empty-state { top: 46%; width: calc(100% - 32px); }
     }
 
@@ -474,7 +474,7 @@
     const mapTilerKey = '__MAPTILER_KEY__';
     const hasMapTilerKey = mapTilerKey && !mapTilerKey.startsWith('__');
     const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const { haversine, prepareTrack } = RouteCore;
+    const { haversine, prepareTrack, MAX_ALLOWED_SPEED_KILOMETERS_PER_HOUR } = RouteCore;
     const emptyFeatureCollection = () => ({ type: 'FeatureCollection', features: [] });
     const mapStyle = hasMapTilerKey
       ? 'https://api.maptiler.com/maps/streets-v2/style.json'
@@ -899,7 +899,7 @@
       setViewMode(view3dEnabled, false);
       ui.summary.textContent = `${(totalDistance / 1000).toFixed(2)} km · ${formatTime(totalDuration)} · ${points.length}/${track.rawPointCount} track points · ${track.removedPoints} filtered`;
       ui.emptyState.hidden = true;
-      setStatus(`${ui.title.textContent} loaded from this device. ${track.removedPoints} GPS points faster than 0:30/km were filtered.`);
+      setStatus(`${ui.title.textContent} loaded from this device. ${track.removedPoints} GPS points faster than ${MAX_ALLOWED_SPEED_KILOMETERS_PER_HOUR} km/h were filtered.`);
       render(0);
     }
 
@@ -1055,7 +1055,7 @@
         await setup(track, file.name);
         try {
           await saveRoute(file.name, format, data);
-          setStatus(`${cleanFileName(file.name)} loaded and saved on this device. ${track.removedPoints} GPS points faster than 0:30/km were filtered.`);
+          setStatus(`${cleanFileName(file.name)} loaded and saved on this device. ${track.removedPoints} GPS points faster than ${MAX_ALLOWED_SPEED_KILOMETERS_PER_HOUR} km/h were filtered.`);
         } catch {
           setStatus(`${cleanFileName(file.name)} loaded. ${track.removedPoints} GPS points were filtered; private browsing prevented local saving.`);
         }
