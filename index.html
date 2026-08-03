@@ -565,7 +565,11 @@
     const savePreference = (key, value) => {
       try { localStorage.setItem(key, String(value)); } catch {}
     };
-    const formatTime = (seconds) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
+    const formatTime = (seconds) => {
+      const elapsed = Math.max(0, Math.floor(seconds));
+      return [Math.floor(elapsed / 3600), Math.floor(elapsed % 3600 / 60), elapsed % 60]
+        .map((part) => String(part).padStart(2, '0')).join(':');
+    };
     const formatPace = (seconds) => {
       if (!Number.isFinite(seconds) || seconds <= 0) return '—';
       const rounded = Math.round(seconds);
@@ -597,7 +601,7 @@
 
     console.assert(
       clamp(2, 0, 1) === 1 &&
-      formatTime(65) === '1:05' &&
+      formatTime(3299) === '00:54:59' &&
       formatPace(355.4) === '5:55/km' &&
       cleanFileName('sample_route.gpx') === 'Sample Route' &&
       ui.speed.value === '1' &&
