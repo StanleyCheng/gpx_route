@@ -11,7 +11,7 @@ const spike = { lat: 22.31, lon: 114.18, time: 1000 };
 const recovery = { lat: 22.30001, lon: 114.17001, time: 2000 };
 const filtered = filterGpsSpikes([start, spike, recovery]);
 
-assert.equal(FASTEST_ALLOWED_PACE_SECONDS_PER_KM, 210);
+assert.equal(FASTEST_ALLOWED_PACE_SECONDS_PER_KM, 30);
 assert.deepEqual(filtered.points, [start, recovery]);
 assert.equal(filtered.removedPoints, 1);
 

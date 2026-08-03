@@ -899,7 +899,7 @@
       setViewMode(view3dEnabled, false);
       ui.summary.textContent = `${(totalDistance / 1000).toFixed(2)} km · ${formatTime(totalDuration)} · ${points.length}/${track.rawPointCount} track points · ${track.removedPoints} filtered`;
       ui.emptyState.hidden = true;
-      setStatus(`${ui.title.textContent} loaded from this device. ${track.removedPoints} GPS points faster than 3:30/km were filtered.`);
+      setStatus(`${ui.title.textContent} loaded from this device. ${track.removedPoints} GPS points faster than 0:30/km were filtered.`);
       render(0);
     }
 
@@ -1055,7 +1055,7 @@
         await setup(track, file.name);
         try {
           await saveRoute(file.name, format, data);
-          setStatus(`${cleanFileName(file.name)} loaded and saved on this device. ${track.removedPoints} GPS points faster than 3:30/km were filtered.`);
+          setStatus(`${cleanFileName(file.name)} loaded and saved on this device. ${track.removedPoints} GPS points faster than 0:30/km were filtered.`);
         } catch {
           setStatus(`${cleanFileName(file.name)} loaded. ${track.removedPoints} GPS points were filtered; private browsing prevented local saving.`);
         }
