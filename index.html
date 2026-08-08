@@ -53,8 +53,10 @@
       position: fixed;
       z-index: 3;
       top: max(22px, env(safe-area-inset-top));
+      right: max(24px, env(safe-area-inset-right));
       left: max(24px, env(safe-area-inset-left));
-      max-width: calc(100% - 120px);
+      max-width: 920px;
+      margin: auto;
       padding: 14px 16px;
       border: 1px solid rgba(255, 255, 255, .12);
       border-radius: 16px;
@@ -63,7 +65,7 @@
       transition: width .2s, padding .2s;
     }
 
-    .topbar-details { min-width: 0; overflow: hidden; padding-right: 38px; }
+    .topbar-details { min-width: 0; overflow: hidden; }
     .topbar-toggle {
       position: absolute;
       top: 10px;
@@ -81,7 +83,7 @@
     }
     .topbar-toggle::-webkit-details-marker { display: none; }
     .topbar-toggle::before { content: '−'; }
-    .topbar:not([open]) { width: 44px; height: 44px; padding: 0; border-radius: 13px; }
+    .topbar:not([open]) { right: auto; width: 44px; height: 44px; margin: 0; padding: 0; border-radius: 13px; }
     .topbar:not([open]) .topbar-toggle { inset: 0; width: 42px; height: 42px; border: 0; background: transparent; }
     .topbar:not([open]) .topbar-toggle::before { content: '+'; }
 
@@ -96,6 +98,7 @@
 
     h1 {
       margin: 0;
+      padding-right: 38px;
       overflow: hidden;
       font-size: clamp(24px, 4vw, 42px);
       line-height: .95;
@@ -110,7 +113,7 @@
       margin: 7px 0 0;
       overflow: hidden;
       color: rgba(244, 247, 245, .72);
-      font-size: 10px;
+      font-size: 11px;
       white-space: nowrap;
     }
 
@@ -357,9 +360,9 @@
     @media (max-width: 580px) {
       .topbar {
         top: max(12px, env(safe-area-inset-top));
-        right: max(58px, calc(env(safe-area-inset-right) + 46px));
-        left: max(12px, env(safe-area-inset-left));
-        max-width: calc(100% - 82px);
+        right: max(10px, env(safe-area-inset-right));
+        left: max(10px, env(safe-area-inset-left));
+        max-width: none;
         padding: 11px 12px;
       }
 
@@ -392,12 +395,8 @@
       .empty-state { top: 46%; width: calc(100% - 32px); }
     }
 
-    @media (max-width: 450px) {
-      .summary { gap: 4px; font-size: 8.25px; }
-    }
-
     @media (max-width: 390px) {
-      .summary { gap: 3px; font-size: 7.5px; }
+      .summary { gap: 3px; font-size: 10px; }
       .secondary-controls { grid-template-columns: 1fr; }
       .secondary-controls .import-button { width: 100%; }
     }
@@ -516,7 +515,7 @@
     const mapTilerKey = '__MAPTILER_KEY__';
     const hasMapTilerKey = mapTilerKey && !mapTilerKey.startsWith('__');
     const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const { haversine, prepareTrack, MAX_ALLOWED_SPEED_KILOMETERS_PER_HOUR } = RouteCore;
+    const { haversine, prepareTrack, MAX_ALLOWED_SPEED_KILOMETERS_PER_HOUR, GPS_SPEED_FILTER_ENABLED } = RouteCore;
     const emptyFeatureCollection = () => ({ type: 'FeatureCollection', features: [] });
     const mapStyle = hasMapTilerKey
       ? 'https://api.maptiler.com/maps/streets-v2/style.json'
@@ -784,6 +783,9 @@
     }
 
     function setStatus(message) { ui.status.textContent = message; }
+    const gpsFilterStatus = (track) => GPS_SPEED_FILTER_ENABLED
+      ? `${track.removedPoints} GPS points faster than ${MAX_ALLOWED_SPEED_KILOMETERS_PER_HOUR} km/h were filtered.`
+      : 'GPS speed filtering is off.';
 
     function setViewMode(enabled, animate = true) {
       view3dEnabled = enabled;
@@ -959,7 +961,7 @@
       ui.startTime.textContent = formatStartTime(track.startTime);
       ui.averagePace.textContent = formatPace(totalDuration / (totalDistance / 1000));
       ui.emptyState.hidden = true;
-      setStatus(`${ui.title.textContent} loaded from this device. ${track.removedPoints} GPS points faster than ${MAX_ALLOWED_SPEED_KILOMETERS_PER_HOUR} km/h were filtered.`);
+      setStatus(`${ui.title.textContent} loaded from this device. ${gpsFilterStatus(track)}`);
       render(0);
     }
 
@@ -1115,9 +1117,9 @@
         await setup(track, file.name);
         try {
           await saveRoute(file.name, format, data);
-          setStatus(`${cleanFileName(file.name)} loaded and saved on this device. ${track.removedPoints} GPS points faster than ${MAX_ALLOWED_SPEED_KILOMETERS_PER_HOUR} km/h were filtered.`);
+          setStatus(`${cleanFileName(file.name)} loaded and saved on this device. ${gpsFilterStatus(track)}`);
         } catch {
-          setStatus(`${cleanFileName(file.name)} loaded. ${track.removedPoints} GPS points were filtered; private browsing prevented local saving.`);
+          setStatus(`${cleanFileName(file.name)} loaded. ${gpsFilterStatus(track)} Private browsing prevented local saving.`);
         }
       } catch (error) {
         ui.emptyState.hidden = false;
