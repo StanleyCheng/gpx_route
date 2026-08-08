@@ -1,6 +1,6 @@
 export const MAX_ALLOWED_SPEED_KILOMETERS_PER_HOUR = 150;
 export const MAX_ALLOWED_SPEED_METERS_PER_SECOND = MAX_ALLOWED_SPEED_KILOMETERS_PER_HOUR / 3.6;
-export const GPS_SPEED_FILTER_ENABLED = false;
+export const GPS_SPEED_FILTER_ENABLED = true;
 
 export function haversine(a, b) {
   const toRad = Math.PI / 180;
