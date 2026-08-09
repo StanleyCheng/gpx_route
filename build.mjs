@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { build } from 'esbuild';
 
 const bundle = async (options) => {
@@ -80,4 +80,6 @@ export default {
 
 await rm('dist', { recursive: true, force: true });
 await mkdir('dist/server', { recursive: true });
+await mkdir('dist/.openai', { recursive: true });
 await writeFile('dist/server/index.js', worker);
+await copyFile('.openai/hosting.json', 'dist/.openai/hosting.json');
