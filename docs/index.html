@@ -1,0 +1,1173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111815">
+  <meta property="og:title" content="GPX/FIT Route Replay">
+  <meta property="og:description" content="Open a GPX or Garmin FIT activity file on your device and replay the filtered route on a 2D or 3D animated map.">
+  <meta property="og:image" content="https://stanleycheng.github.io/gpx_route/og.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <title>GPX/FIT Route Replay</title>
+  <link rel="icon" type="image/png" sizes="192x192" href="./favicon.png?v=1">
+  <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png?v=1">
+  <link rel="preconnect" href="https://api.maptiler.com">
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.19.0/dist/maplibre-gl.css">
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #f4f7f5;
+      --muted: #a7b0ab;
+      --panel: rgba(15, 20, 18, .9);
+      --line: rgba(255, 255, 255, .13);
+      --accent: #c9ff45;
+      --route: #e21d2f;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #111815;
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    #map { position: fixed; inset: 0; background: #d9dedb; }
+    .route-overlay { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; pointer-events: none; }
+    .maplibregl-marker { z-index: 2; }
+
+    .shade {
+      position: fixed;
+      inset: 0;
+      z-index: 2;
+      pointer-events: none;
+      background:
+        linear-gradient(180deg, rgba(7, 11, 9, .5), transparent 22%),
+        linear-gradient(0deg, rgba(7, 11, 9, .7), transparent 34%);
+    }
+
+    .topbar {
+      position: fixed;
+      z-index: 3;
+      top: max(22px, env(safe-area-inset-top));
+      right: max(24px, env(safe-area-inset-right));
+      left: max(24px, env(safe-area-inset-left));
+      max-width: 920px;
+      margin: auto;
+      padding: 14px 16px;
+      border: 1px solid rgba(255, 255, 255, .12);
+      border-radius: 16px;
+      background: rgba(15, 20, 18, .3);
+      backdrop-filter: blur(10px);
+      transition: width .2s, padding .2s;
+    }
+
+    .topbar-details { min-width: 0; overflow: hidden; }
+    .topbar-toggle {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      display: grid;
+      width: 30px;
+      height: 30px;
+      place-items: center;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(15, 20, 18, .28);
+      color: var(--muted);
+      cursor: pointer;
+      list-style: none;
+    }
+    .topbar-toggle::-webkit-details-marker { display: none; }
+    .topbar-toggle::before { content: '−'; }
+    .topbar:not([open]) { right: auto; width: 44px; height: 44px; margin: 0; padding: 0; border-radius: 13px; }
+    .topbar:not([open]) .topbar-toggle { inset: 0; width: 42px; height: 42px; border: 0; background: transparent; }
+    .topbar:not([open]) .topbar-toggle::before { content: '+'; }
+
+    .eyebrow {
+      margin: 1px 0 5px;
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      padding-right: 38px;
+      overflow: hidden;
+      font-size: clamp(24px, 4vw, 42px);
+      line-height: .95;
+      letter-spacing: -.055em;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .summary {
+      display: flex;
+      gap: 12px;
+      margin: 7px 0 0;
+      overflow: hidden;
+      color: rgba(244, 247, 245, .72);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .summary strong { color: var(--ink); font-variant-numeric: tabular-nums; font-weight: 750; }
+
+    .control-panel {
+      position: fixed;
+      z-index: 3;
+      right: max(24px, env(safe-area-inset-right));
+      bottom: max(24px, env(safe-area-inset-bottom));
+      left: max(24px, env(safe-area-inset-left));
+      max-width: 920px;
+      margin: auto;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: var(--panel);
+      box-shadow: 0 16px 48px rgba(0, 0, 0, .28);
+      backdrop-filter: blur(18px);
+      transition: max-width .2s, padding .2s;
+    }
+
+    .dashboard-collapse {
+      position: absolute;
+      top: 8px;
+      right: 9px;
+      width: 34px;
+      height: 30px;
+      border-radius: 9px;
+      color: var(--muted);
+      line-height: 1;
+    }
+
+    .panel-details { transition: opacity .15s; }
+    .compact-bar { display: none; align-items: center; gap: 10px; }
+    .compact-distance { min-width: 0; margin-right: auto; }
+    .compact-distance .label { margin-bottom: 1px; }
+    .compact-distance .value { font-size: 16px; }
+
+    .control-panel.collapsed { max-width: 360px; padding: 8px; }
+    .control-panel.collapsed .panel-details,
+    .control-panel.collapsed .dashboard-collapse { display: none; }
+    .control-panel.collapsed .compact-bar { display: flex; }
+
+    .compact-play {
+      width: 42px;
+      flex: 0 0 42px;
+      border-color: transparent;
+      background: var(--accent);
+      color: #10150f;
+      font-size: 17px;
+    }
+
+    .dashboard-expand { width: 42px; flex: 0 0 42px; }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+
+    .stat { min-width: 0; padding: 0 10px; border-left: 1px solid var(--line); }
+    .stat:first-child { border-left: 0; }
+
+    .label {
+      display: block;
+      margin-bottom: 3px;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+
+    .value {
+      display: block;
+      overflow: hidden;
+      font-size: 17px;
+      font-variant-numeric: tabular-nums;
+      font-weight: 720;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .transport {
+      display: grid;
+      grid-template-columns: 44px 44px minmax(120px, 1fr) 72px auto;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .secondary-controls { display: flex; align-items: center; gap: 14px; }
+    .toggle-grid { display: grid; grid-template-columns: repeat(2, max-content); gap: 8px 14px; }
+
+    button, select {
+      height: 42px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, .07);
+      color: var(--ink);
+      cursor: pointer;
+      font: inherit;
+      font-size: 14px;
+      font-weight: 750;
+    }
+
+    button:hover, select:hover { background: rgba(255, 255, 255, .13); }
+    button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    [data-play] { border-color: transparent; background: var(--accent); color: #10150f; font-size: 17px; }
+    [data-play]:hover { background: #dbff84; }
+    #speed { width: 72px; padding: 0 4px 0 8px; }
+
+    input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer; }
+
+    .marker-toggle {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 10px;
+      font-weight: 750;
+      letter-spacing: .055em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .marker-toggle input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+
+    .switch-track {
+      position: relative;
+      width: 36px;
+      height: 21px;
+      flex: 0 0 36px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, .1);
+      transition: background .2s;
+    }
+
+    .switch-track::after {
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+      background: var(--ink);
+      content: "";
+      transition: transform .2s;
+    }
+
+    .marker-toggle input:checked + .switch-track { background: var(--route); }
+    .marker-toggle input:checked + .switch-track::after { transform: translateX(15px); }
+    .marker-toggle input:focus-visible + .switch-track { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    .import-button {
+      display: inline-grid;
+      height: 42px;
+      padding: 0 12px;
+      place-items: center;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, .07);
+      color: var(--ink);
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 750;
+      white-space: nowrap;
+    }
+
+    .import-button:hover { background: rgba(255, 255, 255, .13); }
+    .import-button:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .gpx-input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+
+    .marker-label {
+      display: grid;
+      width: 28px;
+      height: 28px;
+      place-items: center;
+      border: 2px solid rgba(255, 255, 255, .9);
+      border-radius: 50%;
+      background: #121814;
+      color: #fff;
+      box-shadow: 0 5px 16px rgba(0, 0, 0, .36);
+      font-size: 9px;
+      font-weight: 900;
+    }
+
+    .marker-label.end { background: #f2f4ef; color: #10150f; }
+    .km-marker { transition: opacity .25s; }
+
+    .km-marker span {
+      position: relative;
+      display: grid;
+      width: 34px;
+      height: 34px;
+      place-items: center;
+      border: 2px solid var(--route);
+      border-radius: 50% 50% 50% 4px;
+      background: #fff;
+      color: #b20f1e;
+      box-shadow: 0 5px 15px rgba(0, 0, 0, .28);
+      font-size: 12px;
+      font-weight: 900;
+      transform: rotate(-45deg);
+      animation: marker-pop .25s ease-out;
+    }
+
+    .km-marker span b { transform: rotate(45deg); }
+
+    @keyframes marker-pop {
+      from { opacity: 0; transform: rotate(-45deg) scale(.5) translateY(8px); }
+      to { opacity: 1; transform: rotate(-45deg) scale(1) translateY(0); }
+    }
+
+    .maplibregl-ctrl-top-right { top: max(12px, env(safe-area-inset-top)); right: max(10px, env(safe-area-inset-right)); }
+    .maplibregl-ctrl-group { overflow: hidden; border-radius: 12px; }
+    .maplibregl-ctrl-attrib { border-radius: 8px 0 0; font-size: 10px; }
+
+    .empty-state {
+      position: fixed;
+      z-index: 3;
+      inset: 50% auto auto 50%;
+      width: min(420px, calc(100% - 40px));
+      padding: 24px;
+      transform: translate(-50%, -50%);
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: rgba(15, 20, 18, .92);
+      box-shadow: 0 20px 70px rgba(0, 0, 0, .4);
+      backdrop-filter: blur(18px);
+      text-align: center;
+    }
+
+    .empty-state[hidden] { display: none; }
+    .empty-state h2 { margin: 0 0 8px; font-size: 24px; letter-spacing: -.035em; }
+    .empty-state p { margin: 0 auto 18px; max-width: 32ch; color: var(--muted); line-height: 1.5; }
+    .empty-state .import-button { display: inline-grid; background: var(--accent); color: #10150f; }
+    .empty-note { display: block; margin-top: 12px; color: #89928d; font-size: 11px; }
+    .status { position: fixed; overflow: hidden; width: 1px; height: 1px; clip: rect(0 0 0 0); }
+
+    @media (max-width: 580px) {
+      .topbar {
+        top: max(12px, env(safe-area-inset-top));
+        right: max(10px, env(safe-area-inset-right));
+        left: max(10px, env(safe-area-inset-left));
+        max-width: none;
+        padding: 11px 12px;
+      }
+
+      h1 { font-size: 24px; }
+      .summary { gap: 8px; margin-top: 6px; }
+      .control-panel {
+        right: max(10px, env(safe-area-inset-right));
+        bottom: max(10px, env(safe-area-inset-bottom));
+        left: max(10px, env(safe-area-inset-left));
+        padding: 13px 10px;
+        border-radius: 17px;
+      }
+
+      .control-panel.collapsed { max-width: none; }
+      .stats { grid-template-columns: repeat(2, 1fr); row-gap: 12px; }
+      .stat:nth-child(3) { border-left: 0; }
+      .transport { grid-template-columns: 42px 42px 1fr 68px; gap: 6px; }
+      #speed { width: 68px; padding-left: 5px; font-size: 12px; }
+      .secondary-controls {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 106px;
+        gap: 10px;
+        margin-top: 6px;
+      }
+
+      .toggle-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 5px; }
+      .marker-toggle { min-width: 0; font-size: 9px; }
+      .secondary-controls .import-button { width: 106px; height: 38px; padding: 0 7px; }
+      .empty-state { top: 46%; width: calc(100% - 32px); }
+    }
+
+    @media (max-width: 390px) {
+      .summary { gap: 3px; font-size: 10px; }
+      .secondary-controls { grid-template-columns: 1fr; }
+      .secondary-controls .import-button { width: 100%; }
+    }
+
+    @media (max-height: 700px) and (max-width: 580px) {
+      .empty-state { top: 42%; }
+      .control-panel:not(.collapsed) .stats { display: none; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <div id="map" aria-label="Animated GPX or FIT route map"></div>
+  <div class="shade"></div>
+
+  <details class="topbar" open>
+    <summary class="topbar-toggle" aria-label="Show or hide route title"></summary>
+    <div class="topbar-details" id="topbar-details">
+      <p class="eyebrow">Route replay</p>
+      <h1 id="title">GPX/FIT Route Replay</h1>
+      <p class="summary"><span>Distance <strong id="total-distance">—</strong></span><span>Start <strong id="start-time">—</strong></span><span>Avg pace <strong id="average-pace">—</strong></span></p>
+    </div>
+  </details>
+
+  <section class="empty-state" id="empty-state">
+    <h2>Open a route from your iPhone</h2>
+    <p>Select a GPX or Garmin activity FIT file from Files or iCloud Drive. Your route stays in this browser and is never uploaded.</p>
+    <label class="import-button">
+      Choose GPX/FIT
+      <input class="gpx-input" type="file" accept=".gpx,.fit,application/gpx+xml,application/xml,text/xml,application/octet-stream">
+    </label>
+    <small class="empty-note">The last selected route will reopen on this device.</small>
+  </section>
+
+  <main class="control-panel" id="dashboard" aria-label="Route playback controls">
+    <button class="dashboard-collapse" id="dashboard-collapse" type="button" aria-label="Hide dashboard">⌄</button>
+    <div class="panel-details">
+      <section class="stats" aria-live="polite">
+        <div class="stat"><span class="label">Distance</span><span class="value" id="distance">0.00 km</span></div>
+        <div class="stat"><span class="label">Elapsed</span><span class="value" id="elapsed">0:00</span></div>
+        <div class="stat"><span class="label">Elevation</span><span class="value" id="elevation">—</span></div>
+        <div class="stat"><span class="label">Heart rate</span><span class="value" id="heart-rate">—</span></div>
+      </section>
+      <section class="transport">
+        <button type="button" data-play aria-label="Play route">▶</button>
+        <button id="restart" type="button" aria-label="Restart route">↺</button>
+        <input id="progress" type="range" min="0" max="1000" value="0" aria-label="Route progress">
+        <select id="speed" aria-label="Playback speed">
+          <option value="0.05">0.05×</option>
+          <option value="0.1">0.1×</option>
+          <option value="0.5">0.5×</option>
+          <option value="1" selected>1×</option>
+          <option value="2">2×</option>
+          <option value="4">4×</option>
+        </select>
+        <div class="secondary-controls">
+          <div class="toggle-grid">
+            <label class="marker-toggle">
+              <input id="marker-toggle" type="checkbox">
+              <span class="switch-track" aria-hidden="true"></span>
+              KM markers
+            </label>
+            <label class="marker-toggle">
+              <input id="endpoint-toggle" type="checkbox" checked>
+              <span class="switch-track" aria-hidden="true"></span>
+              Start / finish
+            </label>
+            <label class="marker-toggle">
+              <input id="view-3d-toggle" type="checkbox" checked>
+              <span class="switch-track" aria-hidden="true"></span>
+              3D terrain
+            </label>
+            <label class="marker-toggle">
+              <input id="follow-toggle" type="checkbox" checked>
+              <span class="switch-track" aria-hidden="true"></span>
+              Follow
+            </label>
+          </div>
+          <label class="import-button">
+            Choose GPX/FIT
+            <input class="gpx-input" type="file" accept=".gpx,.fit,application/gpx+xml,application/xml,text/xml,application/octet-stream">
+          </label>
+        </div>
+      </section>
+    </div>
+    <div class="compact-bar">
+      <button class="compact-play" type="button" data-play aria-label="Play route">▶</button>
+      <div class="compact-distance">
+        <span class="label">Distance</span>
+        <span class="value" id="compact-distance">0.00 km</span>
+      </div>
+      <button class="dashboard-expand" id="dashboard-expand" type="button" aria-label="Show dashboard">⌃</button>
+    </div>
+  </main>
+  <p class="status" id="status" aria-live="polite"></p>
+
+  <script src="https://unpkg.com/maplibre-gl@5.19.0/dist/maplibre-gl.js"></script>
+  <script>var RouteCore=(()=>{var m=Object.defineProperty;var d=Object.getOwnPropertyDescriptor;var f=Object.getOwnPropertyNames;var _=Object.prototype.hasOwnProperty;var M=(e,t)=>{for(var n in t)m(e,n,{get:t[n],enumerable:!0})},P=(e,t,n,o)=>{if(t&&typeof t=="object"||typeof t=="function")for(let i of f(t))!_.call(e,i)&&i!==n&&m(e,i,{get:()=>t[i],enumerable:!(o=d(t,i))||o.enumerable});return e};var N=e=>P(m({},"__esModule",{value:!0}),e);var h={};M(h,{GPS_SPEED_FILTER_ENABLED:()=>u,MAX_ALLOWED_SPEED_KILOMETERS_PER_HOUR:()=>S,MAX_ALLOWED_SPEED_METERS_PER_SECOND:()=>a,filterGpsSpikes:()=>E,haversine:()=>c,normalizePointTimes:()=>l,prepareTrack:()=>T});var S=200,a=55.55555555555556,u=!0;function c(e,t){let n=Math.PI/180,o=(t.lat-e.lat)*n,i=(t.lon-e.lon)*n,r=Math.sin(o/2)**2+Math.cos(e.lat*n)*Math.cos(t.lat*n)*Math.sin(i/2)**2;return 12742e3*Math.asin(Math.sqrt(r))}function E(e,t=u?a:1/0){let n=[],o=0,i=null;for(let r of e){let s=Number(r.time);if(i&&Number.isFinite(s)&&s>i.time){let p=(s-i.time)/1e3;if(c(i,r)/p>t){o+=1;continue}}n.push(r),Number.isFinite(s)&&(!i||s>i.time)&&(i={...r,time:s})}return{points:n,removedPoints:o}}function l(e){let t=e.findIndex(i=>Number.isFinite(Number(i.time))),o=(t>=0?Number(e[t].time):0)-(t+1)*1e3;return e.map(i=>{let r=Number(i.time),s=Number.isFinite(r)&&r>o?r:o+1e3;return o=s,{...i,time:s}})}function T(e){let t=E(e);if(t.points.length<2)throw new Error("The route needs at least two usable track points after GPS spike filtering.");let n=Number(t.points.find(o=>Number.isFinite(Number(o.time)))?.time);return{points:l(t.points),startTime:Number.isFinite(n)?n:null,rawPointCount:e.length,removedPoints:t.removedPoints}}return N(h);})();
+</script>
+  <script type="module">
+    const $ = (selector) => document.querySelector(selector);
+    const ui = {
+      title: $('#title'), totalDistance: $('#total-distance'), startTime: $('#start-time'), averagePace: $('#average-pace'),
+      distance: $('#distance'),
+      elapsed: $('#elapsed'), elevation: $('#elevation'), heartRate: $('#heart-rate'),
+      compactDistance: $('#compact-distance'), playButtons: [...document.querySelectorAll('[data-play]')],
+      restart: $('#restart'), progress: $('#progress'), speed: $('#speed'),
+      markerToggle: $('#marker-toggle'), endpointToggle: $('#endpoint-toggle'),
+      view3dToggle: $('#view-3d-toggle'), followToggle: $('#follow-toggle'),
+      dashboard: $('#dashboard'), emptyState: $('#empty-state'), status: $('#status'),
+      fileInputs: [...document.querySelectorAll('.gpx-input')]
+    };
+
+    const mapTilerKey = '';
+    const hasMapTilerKey = mapTilerKey && !mapTilerKey.startsWith('__');
+    const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const { haversine, prepareTrack, MAX_ALLOWED_SPEED_KILOMETERS_PER_HOUR, GPS_SPEED_FILTER_ENABLED } = RouteCore;
+    const emptyFeatureCollection = () => ({ type: 'FeatureCollection', features: [] });
+    const mapStyle = hasMapTilerKey
+      ? 'https://api.maptiler.com/maps/streets-v2/style.json'
+      : 'https://tiles.openfreemap.org/styles/bright';
+
+    const map = new maplibregl.Map({
+      container: 'map',
+      style: mapStyle,
+      center: [114.1694, 22.3193],
+      zoom: 12,
+      pitch: 0,
+      maxPitch: 65,
+      attributionControl: true,
+      canvasContextAttributes: { antialias: true },
+      transformRequest(url) {
+        if (!hasMapTilerKey) return { url };
+        const requestUrl = new URL(url);
+        if (requestUrl.hostname === 'api.maptiler.com' && !requestUrl.searchParams.has('key')) {
+          requestUrl.searchParams.set('key', mapTilerKey);
+        }
+        return { url: requestUrl.toString() };
+      }
+    });
+
+    const routeOverlay = document.createElement('canvas');
+    routeOverlay.className = 'route-overlay';
+    map.getContainer().append(routeOverlay);
+
+    let mapReady = false;
+    let points = [];
+    let displayPoints = [];
+    let cumulativeDistance = [];
+    let totalDistance = 0;
+    let totalDuration = 0;
+    let mileageMarkers = [];
+    let endpointMarkers = [];
+    let playing = false;
+    let progress = 0;
+    let lastFrame = 0;
+    let followBearing = 0;
+    let speed = Number(ui.speed.value);
+    let completedRoute = [];
+    let overlayVisible = false;
+    let view3dEnabled = false;
+    const replayDuration = 50;
+    const routeStore = { database: 'gpx-route-replay', store: 'routes', key: 'current' };
+    const preferenceDefaultsVersion = '3';
+
+    const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+    const savePreference = (key, value) => {
+      try { localStorage.setItem(key, String(value)); } catch {}
+    };
+    const formatTime = (seconds) => {
+      const elapsed = Math.max(0, Math.floor(seconds));
+      return [Math.floor(elapsed / 3600), Math.floor(elapsed % 3600 / 60), elapsed % 60]
+        .map((part) => String(part).padStart(2, '0')).join(':');
+    };
+    const formatPace = (seconds) => {
+      if (!Number.isFinite(seconds) || seconds <= 0) return '—';
+      const rounded = Math.round(seconds);
+      return `${Math.floor(rounded / 60)}:${String(rounded % 60).padStart(2, '0')}/km`;
+    };
+    const formatStartTime = (timestamp) => {
+      const date = new Date(timestamp);
+      if (!Number.isFinite(date.getTime())) return '—';
+      const pad = (part) => String(part).padStart(2, '0');
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    };
+    const cleanFileName = (fileName) => fileName
+      .replace(/\.[^.]+$/, '')
+      .replace(/[_-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/\b\w/g, (letter) => letter.toUpperCase()) || 'Route';
+
+    const bearingBetween = (a, b) => {
+      const toRad = Math.PI / 180;
+      const toDeg = 180 / Math.PI;
+      const lon = (b.lon - a.lon) * toRad;
+      const lat1 = a.lat * toRad;
+      const lat2 = b.lat * toRad;
+      return Math.atan2(
+        Math.sin(lon) * Math.cos(lat2),
+        Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(lon)
+      ) * toDeg;
+    };
+
+    const blendBearing = (current, target, amount) => {
+      const delta = ((target - current + 540) % 360) - 180;
+      return current + delta * amount;
+    };
+
+    console.assert(
+      clamp(2, 0, 1) === 1 &&
+      formatTime(3299) === '00:54:59' &&
+      formatPace(355.4) === '5:55/km' &&
+      formatStartTime(new Date(2026, 6, 27, 11, 1).getTime()) === '2026-07-27 11:01' &&
+      cleanFileName('sample_route.gpx') === 'Sample Route' &&
+      ui.speed.value === '1' &&
+      [...ui.speed.options].map((option) => Number(option.value)).join() === '0.05,0.1,0.5,1,2,4' &&
+      Math.abs(blendBearing(170, -170, .5) - 180) < .001,
+      'Route helpers failed'
+    );
+    function lineFeature(list) {
+      if (list.length < 2) return emptyFeatureCollection();
+      return {
+        type: 'Feature',
+        properties: {},
+        geometry: { type: 'LineString', coordinates: list.map((point) => [point.lon, point.lat]) }
+      };
+    }
+
+    const usableProjection = (point, width, height) =>
+      Number.isFinite(point.x) && Number.isFinite(point.y) &&
+      point.x >= -width && point.x <= width * 2 &&
+      point.y >= -height && point.y <= height * 2;
+    console.assert(
+      usableProjection({ x: 150, y: 300 }, 300, 600) &&
+      !usableProjection({ x: -1000, y: 300 }, 300, 600),
+      'Route projection guard failed'
+    );
+
+    function drawRouteOverlay() {
+      if (!view3dEnabled && !overlayVisible) return;
+      const width = routeOverlay.clientWidth;
+      const height = routeOverlay.clientHeight;
+      const scale = devicePixelRatio || 1;
+      if (routeOverlay.width !== Math.round(width * scale) || routeOverlay.height !== Math.round(height * scale)) {
+        routeOverlay.width = Math.round(width * scale);
+        routeOverlay.height = Math.round(height * scale);
+      }
+      const context = routeOverlay.getContext('2d');
+      context.setTransform(scale, 0, 0, scale, 0, 0);
+      context.clearRect(0, 0, width, height);
+      overlayVisible = view3dEnabled && completedRoute.length > 1;
+      if (!overlayVisible) return;
+
+      context.beginPath();
+      const maxJump = Math.hypot(width, height);
+      let previous = null;
+      for (const point of completedRoute) {
+        const projected = map.project([point.lon, point.lat]);
+        if (!usableProjection(projected, width, height)) {
+          previous = null;
+          continue;
+        }
+        const continuous = previous && Math.hypot(projected.x - previous.x, projected.y - previous.y) <= maxJump;
+        context[continuous ? 'lineTo' : 'moveTo'](projected.x, projected.y);
+        previous = projected;
+      }
+      context.lineCap = 'round';
+      context.lineJoin = 'round';
+      context.strokeStyle = '#e21d2f';
+      context.lineWidth = 6;
+      context.stroke();
+
+      const tip = map.project([completedRoute.at(-1).lon, completedRoute.at(-1).lat]);
+      if (!usableProjection(tip, width, height)) return;
+      context.beginPath();
+      context.arc(tip.x, tip.y, 8, 0, Math.PI * 2);
+      context.fillStyle = '#c9ff45';
+      context.fill();
+      context.lineWidth = 3;
+      context.strokeStyle = '#10150f';
+      context.stroke();
+    }
+
+    function addMapLayers() {
+      map.addSource('terrain-dem', hasMapTilerKey ? {
+        type: 'raster-dem',
+        url: 'https://api.maptiler.com/tiles/terrain-rgb-v2/tiles.json',
+        encoding: 'mapbox'
+      } : {
+        type: 'raster-dem',
+        tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+        tileSize: 256,
+        maxzoom: 15,
+        encoding: 'terrarium'
+      });
+      map.addSource('route-complete', { type: 'geojson', data: emptyFeatureCollection(), tolerance: 0 });
+      map.addSource('runner', { type: 'geojson', data: emptyFeatureCollection() });
+
+      const firstSymbol = map.getStyle().layers.find((layer) => layer.type === 'symbol')?.id;
+      const vectorSource = Object.entries(map.getStyle().sources).find(([, source]) => source.type === 'vector')?.[0];
+      if (vectorSource) {
+        map.addLayer({
+          id: '3d-buildings',
+          type: 'fill-extrusion',
+          source: vectorSource,
+          'source-layer': 'building',
+          minzoom: 14.2,
+          layout: { visibility: 'none' },
+          paint: {
+            'fill-extrusion-color': '#d5d8d2',
+            'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 8],
+            'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
+            'fill-extrusion-opacity': .72,
+            'fill-extrusion-vertical-gradient': true
+          }
+        }, firstSymbol);
+      }
+
+      map.addLayer({ id: 'route-complete', type: 'line', source: 'route-complete', paint: {
+        'line-color': '#e21d2f', 'line-width': 6, 'line-opacity': 1
+      }, layout: { 'line-cap': 'round', 'line-join': 'round' }}, firstSymbol);
+      map.addLayer({ id: 'runner-shadow', type: 'circle', source: 'runner', paint: {
+        'circle-radius': 12, 'circle-color': '#10150f', 'circle-opacity': .34, 'circle-blur': .35
+      }});
+      map.addLayer({ id: 'runner-dot', type: 'circle', source: 'runner', paint: {
+        'circle-radius': 8, 'circle-color': '#c9ff45', 'circle-stroke-width': 3, 'circle-stroke-color': '#10150f'
+      }});
+    }
+
+    const mapLoaded = new Promise((resolve) => {
+      map.once('style.load', () => {
+        addMapLayers();
+        mapReady = true;
+        resolve();
+      });
+    });
+
+    function openRouteDatabase() {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open(routeStore.database, 1);
+        request.onupgradeneeded = () => request.result.createObjectStore(routeStore.store);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    async function saveRoute(fileName, format, data) {
+      const database = await openRouteDatabase();
+      await new Promise((resolve, reject) => {
+        const transaction = database.transaction(routeStore.store, 'readwrite');
+        transaction.objectStore(routeStore.store).put({ fileName, format, data }, routeStore.key);
+        transaction.oncomplete = resolve;
+        transaction.onerror = () => reject(transaction.error);
+      });
+      database.close();
+    }
+
+    async function readSavedRoute() {
+      const database = await openRouteDatabase();
+      const saved = await new Promise((resolve, reject) => {
+        const request = database.transaction(routeStore.store).objectStore(routeStore.store).get(routeStore.key);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      database.close();
+      return saved;
+    }
+
+    function setDashboardCollapsed(collapsed) {
+      ui.dashboard.classList.toggle('collapsed', collapsed);
+      try { localStorage.setItem('dashboard-collapsed', String(collapsed)); } catch {}
+      setTimeout(() => map.resize(), 220);
+    }
+
+    function setPlayState(nextPlaying) {
+      playing = nextPlaying;
+      for (const button of ui.playButtons) {
+        button.textContent = playing ? 'Ⅱ' : '▶';
+        button.setAttribute('aria-label', playing ? 'Pause route' : progress >= 1 ? 'Replay route' : 'Play route');
+      }
+    }
+
+    function setStatus(message) { ui.status.textContent = message; }
+    const gpsFilterStatus = (track) => GPS_SPEED_FILTER_ENABLED
+      ? `${track.removedPoints} GPS points faster than ${MAX_ALLOWED_SPEED_KILOMETERS_PER_HOUR} km/h were filtered.`
+      : 'GPS speed filtering is off.';
+
+    function setViewMode(enabled, animate = true) {
+      view3dEnabled = enabled;
+      ui.view3dToggle.checked = enabled;
+      savePreference('3d-enabled', enabled);
+      if (!mapReady) return;
+
+      if (map.getLayer('3d-buildings')) map.setLayoutProperty('3d-buildings', 'visibility', enabled ? 'visible' : 'none');
+      for (const id of ['route-complete', 'runner-shadow', 'runner-dot']) {
+        if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', enabled ? 'none' : 'visible');
+      }
+
+      const camera = { pitch: enabled ? 50 : 0, bearing: enabled ? -18 : 0 };
+      const moveCamera = () => {
+        if (enabled !== view3dEnabled) return;
+        if (!animate || reducedMotion) map.jumpTo(camera);
+        else map.easeTo({ ...camera, duration: 700, essential: false });
+      };
+      if (enabled) {
+        map.jumpTo({ pitch: 0, bearing: 0 });
+        const enableTerrain = () => {
+          if (!view3dEnabled) return;
+          map.setTerrain({ source: 'terrain-dem', exaggeration: 1 });
+          moveCamera();
+        };
+        if (animate) enableTerrain();
+        else {
+          map.setTerrain(null);
+          setTimeout(enableTerrain, 500);
+        }
+      } else {
+        map.setTerrain(null);
+        moveCamera();
+      }
+      setStatus(enabled ? '3D terrain enabled.' : '2D map enabled.');
+    }
+
+    function parseGpx(xmlText) {
+      const xml = new DOMParser().parseFromString(xmlText, 'application/xml');
+      if (xml.querySelector('parsererror')) throw new Error('The GPX file is not valid XML.');
+
+      const trackPoints = [...xml.getElementsByTagNameNS('*', 'trkpt')].map((node, index) => {
+        const value = (name) => node.getElementsByTagNameNS('*', name)[0]?.textContent;
+        return {
+          lat: Number(node.getAttribute('lat')),
+          lon: Number(node.getAttribute('lon')),
+          ele: Number(value('ele')),
+          time: Date.parse(value('time')),
+          hr: Number(value('hr')),
+          index
+        };
+      }).filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lon));
+
+      if (trackPoints.length < 2) throw new Error('The GPX file needs at least two track points.');
+      return prepareTrack(trackPoints);
+    }
+
+    let fitSdkPromise;
+    const loadFitSdk = () => fitSdkPromise ??= import('./fit-sdk.js');
+
+    async function parseFit(arrayBuffer) {
+      const FitSdk = await loadFitSdk();
+      const stream = FitSdk.Stream.fromArrayBuffer(arrayBuffer);
+      const decoder = new FitSdk.Decoder(stream);
+      if (!decoder.isFIT()) throw new Error('The selected file does not have a valid FIT header.');
+
+      const { messages, errors } = decoder.read();
+      if (errors.length) throw new Error(`The FIT activity could not be decoded: ${errors[0].message}`);
+      if (messages.fileIdMesgs?.[0]?.type !== 'activity') {
+        throw new Error('Choose a Garmin activity FIT file containing recorded GPS points.');
+      }
+
+      const semicirclesToDegrees = 180 / (2 ** 31);
+      const fitTimestamp = (value) => {
+        if (value instanceof Date) return value.getTime();
+        const timestamp = Number(value);
+        return Number.isFinite(timestamp) ? timestamp * 1000 + FitSdk.Utils.FIT_EPOCH_MS : Number.NaN;
+      };
+      const trackPoints = (messages.recordMesgs ?? []).map((record, index) => ({
+        lat: Number(record.positionLat) * semicirclesToDegrees,
+        lon: Number(record.positionLong) * semicirclesToDegrees,
+        ele: Number(record.enhancedAltitude ?? record.altitude),
+        time: fitTimestamp(record.timestamp),
+        hr: Number(record.heartRate),
+        index
+      })).filter((point) =>
+        Number.isFinite(point.lat) && point.lat >= -90 && point.lat <= 90 &&
+        Number.isFinite(point.lon) && point.lon >= -180 && point.lon <= 180
+      );
+
+      if (trackPoints.length < 2) throw new Error('The FIT activity needs at least two recorded GPS points.');
+      return prepareTrack(trackPoints);
+    }
+
+    const routeFormat = (fileName) => fileName.toLowerCase().endsWith('.fit') ? 'fit' :
+      fileName.toLowerCase().endsWith('.gpx') ? 'gpx' : null;
+
+    async function parseRouteData(format, data) {
+      if (format === 'fit') return parseFit(data);
+      if (format === 'gpx') return parseGpx(data);
+      throw new Error('Choose a GPX or Garmin activity FIT file.');
+    }
+
+    function makeMarker(label, point, className = '') {
+      const element = document.createElement('div');
+      element.className = `marker-label ${className}`;
+      element.textContent = label;
+      return new maplibregl.Marker({ element, anchor: 'center', opacityWhenCovered: 1 }).setLngLat([point.lon, point.lat]);
+    }
+
+    function fitRouteOverview(duration = 800) {
+      const bounds = new maplibregl.LngLatBounds();
+      displayPoints.forEach((point) => bounds.extend([point.lon, point.lat]));
+      map.fitBounds(bounds, {
+        padding: { top: 110, right: 55, bottom: ui.dashboard.classList.contains('collapsed') ? 100 : 260, left: 55 },
+        bearing: 0,
+        pitch: 0,
+        duration: reducedMotion ? 0 : duration,
+        essential: false
+      });
+    }
+
+    async function setup(track, fileName) {
+      setPlayState(false);
+      progress = 0;
+      lastFrame = 0;
+      completedRoute = [];
+      mileageMarkers.forEach(({ marker }) => marker.remove());
+      endpointMarkers.forEach((marker) => marker.remove());
+      mileageMarkers = [];
+      endpointMarkers = [];
+      points = track.points;
+      displayPoints = points;
+      ui.title.textContent = cleanFileName(fileName);
+      document.title = `${ui.title.textContent} — Route Replay`;
+      totalDuration = Math.max(1, (points.at(-1).time - points[0].time) / 1000);
+      cumulativeDistance = [0];
+      for (let index = 1; index < points.length; index++) {
+        cumulativeDistance[index] = cumulativeDistance[index - 1] + haversine(points[index - 1], points[index]);
+      }
+      totalDistance = cumulativeDistance.at(-1);
+      await mapLoaded;
+
+      for (let km = 1; km * 1000 <= totalDistance; km++) {
+        const distance = km * 1000;
+        const index = cumulativeDistance.findIndex((value) => value >= distance);
+        const previousDistance = cumulativeDistance[index - 1];
+        const mix = (distance - previousDistance) / (cumulativeDistance[index] - previousDistance);
+        const a = points[index - 1];
+        const b = points[index];
+        const element = document.createElement('div');
+        element.className = 'km-marker';
+        const label = document.createElement('span');
+        const number = document.createElement('b');
+        number.textContent = String(km);
+        label.append(number);
+        element.setAttribute('aria-label', `${km} kilometre marker`);
+        element.append(label);
+        mileageMarkers.push({
+          distance,
+          marker: new maplibregl.Marker({ element, anchor: 'bottom', opacityWhenCovered: 1 })
+            .setLngLat([a.lon + (b.lon - a.lon) * mix, a.lat + (b.lat - a.lat) * mix])
+        });
+      }
+      console.assert(mileageMarkers.length === Math.floor(totalDistance / 1000), 'Mileage marker setup failed');
+
+      endpointMarkers = [makeMarker('S', points[0]), makeMarker('F', points.at(-1), 'end')];
+      updateEndpointMarkers();
+
+      fitRouteOverview();
+      setViewMode(view3dEnabled, false);
+      ui.totalDistance.textContent = `${(totalDistance / 1000).toFixed(2)} km`;
+      ui.startTime.textContent = formatStartTime(track.startTime);
+      ui.averagePace.textContent = formatPace(totalDuration / (totalDistance / 1000));
+      ui.emptyState.hidden = true;
+      setStatus(`${ui.title.textContent} loaded from this device. ${gpsFilterStatus(track)}`);
+      render(0);
+    }
+
+    function updateMileageMarkers(distance) {
+      for (const milestone of mileageMarkers) {
+        const visible = ui.markerToggle.checked && milestone.distance <= distance;
+        if (visible && !milestone.marker.getElement().isConnected) milestone.marker.addTo(map);
+        if (!visible && milestone.marker.getElement().isConnected) milestone.marker.remove();
+        const opacity = distance - milestone.distance > 1500 ? .45 : 1;
+        milestone.marker.setOpacity(opacity, opacity);
+      }
+    }
+
+    function updateEndpointMarkers() {
+      for (const marker of endpointMarkers) {
+        const visible = marker.getElement().isConnected;
+        if (ui.endpointToggle.checked && !visible) marker.addTo(map);
+        if (!ui.endpointToggle.checked && visible) marker.remove();
+      }
+    }
+
+    function pointAt(routeProgress) {
+      const targetTime = points[0].time + routeProgress * totalDuration * 1000;
+      let low = 0;
+      let high = points.length - 1;
+      while (low < high) {
+        const middle = Math.ceil((low + high) / 2);
+        if (points[middle].time <= targetTime) low = middle;
+        else high = middle - 1;
+      }
+      const index = Math.min(low, points.length - 2);
+      const a = points[index];
+      const b = points[index + 1];
+      const mix = clamp((targetTime - a.time) / Math.max(1, b.time - a.time), 0, 1);
+      const current = {
+        index,
+        mix,
+        lat: a.lat + (b.lat - a.lat) * mix,
+        lon: a.lon + (b.lon - a.lon) * mix,
+        ele: a.ele + (b.ele - a.ele) * mix,
+        hr: Math.round(a.hr + (b.hr - a.hr) * mix)
+      };
+      current.distance = cumulativeDistance[index] + haversine(a, current);
+      current.bearing = bearingBetween(a, b);
+      return current;
+    }
+
+    function updateFollowCamera(current) {
+      if (!ui.followToggle.checked) return;
+      followBearing = blendBearing(followBearing, current.bearing, .28);
+      const camera = {
+        center: [current.lon, current.lat],
+        bearing: view3dEnabled ? followBearing : 0,
+        pitch: view3dEnabled ? 50 : 0,
+        zoom: Math.max(map.getZoom(), view3dEnabled ? 15.3 : 14.5)
+      };
+      map.jumpTo(camera);
+    }
+
+    function render(nextProgress) {
+      progress = clamp(nextProgress, 0, 1);
+      const current = pointAt(progress);
+      const completed = displayPoints.slice(0, current.index + 1);
+      completed.push(current);
+      completedRoute = completed;
+      map.getSource('route-complete').setData(lineFeature(completedRoute));
+      map.getSource('runner').setData({
+        type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [current.lon, current.lat] }
+      });
+      ui.progress.value = Math.round(progress * 1000);
+      ui.distance.textContent = ui.compactDistance.textContent = `${(current.distance / 1000).toFixed(2)} km`;
+      ui.elapsed.textContent = formatTime(progress * totalDuration);
+      ui.elevation.textContent = Number.isFinite(current.ele) ? `${Math.round(current.ele)} m` : '—';
+      ui.heartRate.textContent = Number.isFinite(current.hr) ? `${current.hr} bpm` : '—';
+      updateMileageMarkers(current.distance);
+      updateFollowCamera(current);
+    }
+
+    function frame(timestamp) {
+      if (!playing) return;
+      if (!lastFrame) lastFrame = timestamp;
+      render(progress + ((timestamp - lastFrame) / 1000 / replayDuration) * speed);
+      lastFrame = timestamp;
+      if (progress >= 1) {
+        setPlayState(false);
+        if (ui.followToggle.checked) fitRouteOverview(1200);
+        return;
+      }
+      requestAnimationFrame(frame);
+    }
+
+    function togglePlayback() {
+      if (!points.length) {
+        ui.fileInputs[0].click();
+        return;
+      }
+      if (progress >= 1) render(0);
+      setPlayState(!playing);
+      lastFrame = 0;
+      if (playing) requestAnimationFrame(frame);
+    }
+
+    for (const button of ui.playButtons) button.addEventListener('click', togglePlayback);
+    ui.restart.addEventListener('click', () => {
+      if (!points.length) return;
+      render(0);
+      if (!playing) togglePlayback();
+    });
+    ui.progress.addEventListener('input', (event) => {
+      if (points.length) render(Number(event.target.value) / 1000);
+    });
+    ui.speed.addEventListener('change', () => {
+      speed = Number(ui.speed.value);
+      setStatus(`Playback speed set to ${speed} times.`);
+    });
+    ui.markerToggle.addEventListener('change', () => {
+      savePreference('km-markers-enabled', ui.markerToggle.checked);
+      if (points.length) updateMileageMarkers(pointAt(progress).distance);
+    });
+    ui.endpointToggle.addEventListener('change', updateEndpointMarkers);
+    ui.view3dToggle.addEventListener('change', () => setViewMode(ui.view3dToggle.checked));
+    ui.followToggle.addEventListener('change', () => {
+      savePreference('follow-enabled', ui.followToggle.checked);
+      if (ui.followToggle.checked && points.length) {
+        const current = pointAt(progress);
+        followBearing = current.bearing;
+        updateFollowCamera(current);
+      }
+      setStatus(ui.followToggle.checked ? 'Follow camera enabled.' : 'Follow camera disabled.');
+    });
+    map.on('render', drawRouteOverlay);
+    map.on('resize', drawRouteOverlay);
+    $('#dashboard-collapse').addEventListener('click', () => setDashboardCollapsed(true));
+    $('#dashboard-expand').addEventListener('click', () => setDashboardCollapsed(false));
+
+    for (const eventName of ['dragstart', 'rotatestart', 'pitchstart']) {
+      map.on(eventName, (event) => {
+        if (event.originalEvent && ui.followToggle.checked) {
+          ui.followToggle.checked = false;
+          savePreference('follow-enabled', false);
+          setStatus('Follow camera paused for manual map movement.');
+        }
+      });
+    }
+
+    async function importRoute(file) {
+      if (!file) return;
+      try {
+        const format = routeFormat(file.name);
+        if (!format) throw new Error('Choose a file ending in .gpx or .fit.');
+        const data = format === 'fit' ? await file.arrayBuffer() : await file.text();
+        const track = await parseRouteData(format, data);
+        await setup(track, file.name);
+        try {
+          await saveRoute(file.name, format, data);
+          setStatus(`${cleanFileName(file.name)} loaded and saved on this device. ${gpsFilterStatus(track)}`);
+        } catch {
+          setStatus(`${cleanFileName(file.name)} loaded. ${gpsFilterStatus(track)} Private browsing prevented local saving.`);
+        }
+      } catch (error) {
+        ui.emptyState.hidden = false;
+        ui.emptyState.querySelector('p').textContent = error.message;
+        setStatus(error.message);
+      }
+    }
+
+    for (const input of ui.fileInputs) {
+      input.addEventListener('change', async (event) => {
+        await importRoute(event.target.files[0]);
+        for (const otherInput of ui.fileInputs) otherInput.value = '';
+      });
+    }
+
+    const readPreference = (key) => {
+      try { return localStorage.getItem(key); } catch { return null; }
+    };
+    const savedDashboardState = readPreference('dashboard-collapsed');
+    setDashboardCollapsed(
+      savedDashboardState === null
+        ? matchMedia('(max-width: 580px)').matches
+        : savedDashboardState === 'true'
+    );
+    if (readPreference('preference-defaults-version') !== preferenceDefaultsVersion) {
+      ui.markerToggle.checked = false;
+      ui.view3dToggle.checked = true;
+      ui.followToggle.checked = true;
+      savePreference('km-markers-enabled', false);
+      savePreference('3d-enabled', true);
+      savePreference('follow-enabled', true);
+      savePreference('preference-defaults-version', preferenceDefaultsVersion);
+    } else {
+      ui.markerToggle.checked = readPreference('km-markers-enabled') === 'true';
+      ui.view3dToggle.checked = readPreference('3d-enabled') !== 'false';
+      ui.followToggle.checked = readPreference('follow-enabled') !== 'false';
+    }
+    view3dEnabled = ui.view3dToggle.checked;
+
+    readSavedRoute()
+      .then((saved) => {
+        if (!saved) return mapLoaded.then(() => setViewMode(view3dEnabled, false));
+        const format = saved.format ?? 'gpx';
+        const data = saved.data ?? saved.xmlText;
+        return parseRouteData(format, data).then((track) => setup(track, saved.fileName));
+      })
+      .catch(() => setStatus('Choose a GPX or FIT file to begin.'));
+  </script>
+</body>
+</html>

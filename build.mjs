@@ -26,6 +26,12 @@ const routeCoreBundle = await bundle({
 });
 const html = (await readFile('index.html', 'utf8'))
   .replace('__ROUTE_CORE_BUNDLE__', routeCoreBundle);
+const pagesHtml = html
+  .replaceAll('__SITE_ORIGIN__', 'https://stanleycheng.github.io/gpx_route')
+  .replaceAll('__MAPTILER_KEY__', '')
+  .replace('href="/favicon.png', 'href="./favicon.png')
+  .replace('href="/apple-touch-icon.png', 'href="./apple-touch-icon.png')
+  .replace("import('/fit-sdk.js')", "import('./fit-sdk.js')");
 const socialImage = (await readFile('public/og.png')).toString('base64');
 const faviconImage = (await readFile('public/favicon.png')).toString('base64');
 const appleTouchIcon = (await readFile('public/apple-touch-icon.png')).toString('base64');
@@ -79,7 +85,14 @@ export default {
 `;
 
 await rm('dist', { recursive: true, force: true });
+await rm('docs', { recursive: true, force: true });
 await mkdir('dist/server', { recursive: true });
 await mkdir('dist/.openai', { recursive: true });
+await mkdir('docs', { recursive: true });
 await writeFile('dist/server/index.js', worker);
 await copyFile('.openai/hosting.json', 'dist/.openai/hosting.json');
+await writeFile('docs/index.html', pagesHtml);
+await writeFile('docs/fit-sdk.js', fitSdkBundle);
+await writeFile('docs/.nojekyll', '');
+await Promise.all(['og.png', 'favicon.png', 'apple-touch-icon.png']
+  .map((file) => copyFile(`public/${file}`, `docs/${file}`)));
