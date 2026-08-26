@@ -1,37 +1,44 @@
-import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
+const PREFERRED_MIMES = [
+  'video/mp4;codecs=avc1.42E01F', // H.264 Constrained Baseline 3.1 (Safari)
+  'video/mp4;codecs=avc1',        // Generic H.264 in MP4 (Safari)
+  'video/mp4',                    // Any MP4 (Safari)
+  'video/webm;codecs=vp9',        // VP9 in WebM (Chrome)
+  'video/webm;codecs=vp8',        // VP8 in WebM (Chrome/Firefox)
+  'video/webm'                    // Any WebM
+];
 
-const FEATURES = typeof globalThis !== 'undefined' && {
-  VideoEncoder: typeof globalThis.VideoEncoder,
-  VideoFrame: typeof globalThis.VideoFrame,
-  EncodedVideoChunk: typeof globalThis.EncodedVideoChunk
-};
+const FEATURES = typeof globalThis !== 'undefined' ? {
+  MediaRecorder: typeof globalThis.MediaRecorder,
+  captureStream: typeof globalThis.HTMLCanvasElement !== 'undefined'
+    && 'captureStream' in globalThis.HTMLCanvasElement.prototype
+} : null;
 
 export function isRecordingSupported() {
   return Boolean(
-    globalThis.VideoEncoder &&
-    globalThis.VideoFrame &&
-    globalThis.EncodedVideoChunk
+    globalThis.MediaRecorder &&
+    typeof globalThis.HTMLCanvasElement !== 'undefined' &&
+    'captureStream' in globalThis.HTMLCanvasElement.prototype
   );
 }
 
-const SUPPORTED_CODECS = [
-  'avc1.42E01F', // H.264 baseline 3.1 — most compatible
-  'avc1.4D401F', // H.264 main 3.1
-  'avc1.640028'  // H.264 high 4.0
-];
-
-const pickCodec = async (width, height, bitrate, framerate) => {
-  for (const codec of SUPPORTED_CODECS) {
-    try {
-      const support = await VideoEncoder.isConfigSupported({
-        codec, width, height, bitrate, framerate
-      });
-      if (support && support.supported) return codec;
-    } catch {
-      // try the next candidate
-    }
+const pickMimeType = () => {
+  if (typeof MediaRecorder === 'undefined') return null;
+  for (const mime of PREFERRED_MIMES) {
+    if (MediaRecorder.isTypeSupported(mime)) return mime;
   }
-  return null;
+  return MediaRecorder.isTypeSupported('video/webm') ? 'video/webm' : null;
+};
+
+const mimeBase = (mime) => {
+  const semi = mime.indexOf(';');
+  return (semi >= 0 ? mime.slice(0, semi) : mime).trim();
+};
+
+const extensionFor = (mime) => {
+  const base = mimeBase(mime);
+  if (base === 'video/mp4') return 'mp4';
+  if (base === 'video/webm') return 'webm';
+  return 'bin';
 };
 
 const sanitizeFilename = (name) =>
@@ -48,113 +55,130 @@ export function createMapRecorder(canvas, {
   routeName = ''
 } = {}) {
   if (!isRecordingSupported()) {
-    throw new Error('This browser cannot record video. Try Safari 16.4+, Chrome, or Edge.');
+    throw new Error('This browser cannot record the map. Try Safari 16.4+, Chrome, or Edge.');
+  }
+  const mimeType = pickMimeType();
+  if (!mimeType) {
+    throw new Error('No supported video MIME type was found for this browser.');
   }
 
-  let muxer = null;
-  let encoder = null;
-  let captureHandle = 0;
+  let stream = null;
+  let recorder = null;
+  let chunks = [];
   let recording = false;
   let startMs = 0;
-  let frameCount = 0;
-  let width = canvas.width;
-  let height = canvas.height;
-  let codec = null;
+  let dataChunks = 0;
+  let pendingStop = null;
+
+  const releaseStream = () => {
+    if (!stream) return;
+    try {
+      for (const track of stream.getTracks()) track.stop();
+    } catch {}
+    stream = null;
+  };
 
   const start = async () => {
     if (recording) return;
-    width = canvas.width;
-    height = canvas.height;
-    codec = await pickCodec(width, height, bitrate, fps);
-    if (!codec) {
-      throw new Error('No supported H.264 encoder configuration was found for this browser.');
-    }
-    muxer = new Muxer({
-      target: new ArrayBufferTarget(),
-      video: { codec: 'avc', width, height, frameRate: fps },
-      fastStart: 'in-memory',
-      firstTimestampBehavior: 'offset'
-    });
-    encoder = new VideoEncoder({
-      output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
-      error: (error) => console.error('VideoEncoder:', error)
-    });
-    encoder.configure({ codec, width, height, bitrate, framerate: fps });
-    frameCount = 0;
+    chunks = [];
+    dataChunks = 0;
     startMs = performance.now();
-    recording = true;
-    captureHandle = requestAnimationFrame(captureFrame);
-  };
-
-  const captureFrame = (now) => {
-    if (!recording) return;
+    stream = canvas.captureStream(fps);
     try {
-      if (encoder && encoder.encodeQueueSize <= 12) {
-        const timestamp = (now - startMs) * 1000;
-        const frame = new VideoFrame(canvas, { timestamp });
-        encoder.encode(frame, { keyFrame: frameCount % (fps * 2) === 0 });
-        frame.close();
-        frameCount += 1;
-      }
+      recorder = new MediaRecorder(stream, {
+        mimeType,
+        videoBitsPerSecond: bitrate
+      });
     } catch (error) {
-      console.warn('Recorder: frame capture failed:', error);
+      releaseStream();
+      throw new Error(`MediaRecorder rejected the configuration: ${error.message}`);
     }
-    if (recording) captureHandle = requestAnimationFrame(captureFrame);
+    recorder.ondataavailable = (event) => {
+      if (event.data && event.data.size > 0) {
+        chunks.push(event.data);
+        dataChunks += 1;
+      }
+    };
+    recorder.onerror = (event) => {
+      console.error('MediaRecorder error:', event.error || event);
+    };
+    recorder.onstop = () => {
+      const resolve = pendingStop;
+      pendingStop = null;
+      if (resolve) resolve();
+    };
+    try {
+      recorder.start(250);
+      recording = true;
+    } catch (error) {
+      releaseStream();
+      recorder = null;
+      throw new Error(`MediaRecorder failed to start: ${error.message}`);
+    }
   };
 
   const stop = async () => {
-    if (!recording) return null;
+    if (!recording || !recorder) return null;
     recording = false;
-    if (captureHandle) {
-      cancelAnimationFrame(captureHandle);
-      captureHandle = 0;
-    }
-    if (!encoder || !muxer) return null;
-    const durationMs = performance.now() - startMs;
-    const elapsedFrameCount = frameCount;
+    const baseMime = mimeBase(mimeType);
+    const elapsedMs = performance.now() - startMs;
+    const inst = recorder;
     try {
-      await encoder.flush();
-      muxer.finalize();
-      const blob = new Blob([muxer.target.buffer], { type: 'video/mp4' });
-      const url = URL.createObjectURL(blob);
-      const baseName = sanitizeFilename(routeName);
-      const stamp = new Date().toISOString().replace(/[:T]/g, '-').replace(/\..+$/, '');
-      const fileName = `${baseName}-${stamp}.mp4`;
-      return {
-        blob,
-        url,
-        fileName,
-        mimeType: 'video/mp4',
-        durationMs,
-        frameCount: elapsedFrameCount,
-        width,
-        height
-      };
-    } catch (error) {
-      console.error('Recorder: finalize failed:', error);
-      return null;
-    } finally {
-      encoder = null;
-      muxer = null;
-      frameCount = 0;
-    }
+      await new Promise((resolve) => {
+        pendingStop = resolve;
+        const guard = setTimeout(() => {
+          if (pendingStop === resolve) {
+            pendingStop = null;
+            resolve();
+          }
+        }, 3000);
+        pendingStop = () => { clearTimeout(guard); resolve(); };
+        try {
+          if (inst.state === 'recording' || inst.state === 'paused') inst.stop();
+          else { clearTimeout(guard); resolve(); }
+        } catch {
+          clearTimeout(guard);
+          resolve();
+        }
+      });
+    } catch {}
+    releaseStream();
+    recorder = null;
+    if (!chunks.length) return null;
+    const blob = new Blob(chunks, { type: baseMime });
+    if (blob.size === 0) return null;
+    const baseName = sanitizeFilename(routeName);
+    const stamp = new Date().toISOString().replace(/[:T]/g, '-').replace(/\..+$/, '');
+    const fileName = `${baseName}-${stamp}.${extensionFor(mimeType)}`;
+    return {
+      blob,
+      url: URL.createObjectURL(blob),
+      fileName,
+      mimeType: baseMime,
+      durationMs: elapsedMs,
+      frameCount: dataChunks,
+      width: canvas.width,
+      height: canvas.height,
+      isMp4: baseMime === 'video/mp4'
+    };
   };
 
   const discard = () => {
-    if (!recording) return;
+    if (!recording && !recorder) return;
     recording = false;
-    if (captureHandle) {
-      cancelAnimationFrame(captureHandle);
-      captureHandle = 0;
+    if (recorder) {
+      try {
+        if (recorder.state !== 'inactive') recorder.stop();
+      } catch {}
+      recorder = null;
     }
-    encoder = null;
-    muxer = null;
-    frameCount = 0;
+    chunks = [];
+    releaseStream();
   };
 
   const isRecording = () => recording;
 
-  return { start, stop, discard, isRecording };
+  return { start, stop, discard, isRecording, codecLabel: mimeBase(mimeType) };
 }
 
 export const recorderFeatures = FEATURES;
