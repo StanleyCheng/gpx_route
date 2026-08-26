@@ -207,7 +207,11 @@
     }
 
     .secondary-controls { display: flex; align-items: center; gap: 14px; }
-    .toggle-grid { display: grid; grid-template-columns: repeat(2, max-content); gap: 8px 14px; }
+    .toggle-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, max-content));
+      gap: 8px 14px;
+    }
 
     button, select {
       height: 42px;
@@ -270,6 +274,19 @@
     .marker-toggle input:checked + .switch-track { background: var(--route); }
     .marker-toggle input:checked + .switch-track::after { transform: translateX(15px); }
     .marker-toggle input:focus-visible + .switch-track { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .marker-toggle .record-toggle-dot {
+      width: 7px;
+      height: 7px;
+      flex: 0 0 7px;
+      border-radius: 50%;
+      background: rgba(255, 80, 80, .45);
+      box-shadow: 0 0 0 1px rgba(255, 80, 80, .25);
+      transition: background .2s, box-shadow .2s;
+    }
+    .marker-toggle input:checked ~ .record-toggle-dot {
+      background: #ff5757;
+      box-shadow: 0 0 8px rgba(255, 87, 87, .7);
+    }
 
     .import-button {
       display: inline-grid;
@@ -390,6 +407,7 @@
       }
 
       .toggle-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 5px; }
+      .rec-indicator { bottom: calc(max(24px, env(safe-area-inset-bottom)) + 150px); }
       .marker-toggle { min-width: 0; font-size: 9px; }
       .secondary-controls .import-button { width: 106px; height: 38px; padding: 0 7px; }
       .empty-state { top: 46%; width: calc(100% - 32px); }
@@ -409,7 +427,197 @@
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
     }
-  </style>
+  
+    .rec-indicator {
+      position: fixed;
+      left: 50%;
+      bottom: calc(max(24px, env(safe-area-inset-bottom)) + 232px);
+      z-index: 4;
+      display: none;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 16px 9px 13px;
+      border: 1px solid rgba(255, 95, 95, .55);
+      border-radius: 999px;
+      background: rgba(20, 8, 8, .88);
+      color: #ffbcbc;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .2em;
+      text-transform: uppercase;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, .45);
+      transform: translate(-50%, 6px);
+      opacity: 0;
+      transition: transform .25s ease, opacity .25s ease;
+      pointer-events: none;
+    }
+    .rec-indicator.active {
+      display: inline-flex;
+      transform: translate(-50%, 0);
+      opacity: 1;
+    }
+    .rec-indicator .dot {
+      width: 10px;
+      height: 10px;
+      flex: 0 0 10px;
+      border-radius: 50%;
+      background: #ff5757;
+      box-shadow: 0 0 12px rgba(255, 87, 87, .85);
+      animation: rec-pulse 1.1s ease-in-out infinite;
+    }
+    .rec-indicator .rec-elapsed {
+      color: rgba(255, 188, 188, .55);
+      font-variant-numeric: tabular-nums;
+      font-weight: 700;
+      letter-spacing: .12em;
+    }
+    @keyframes rec-pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: .35; transform: scale(.72); }
+    }
+    @media (max-height: 640px) {
+      .rec-indicator { bottom: calc(max(24px, env(safe-area-inset-bottom)) + 180px); }
+    }
+
+    .record-dialog {
+      position: fixed;
+      z-index: 6;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: max(24px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
+      background: rgba(7, 11, 9, .62);
+      backdrop-filter: blur(8px);
+    }
+    .record-dialog.open {
+      display: flex;
+      animation: rec-dialog-in .2s ease-out;
+    }
+    @keyframes rec-dialog-in {
+      from { opacity: 0; }
+      to   { opacity: 1; }
+    }
+    .record-dialog .card {
+      position: relative;
+      width: min(440px, 100%);
+      padding: 26px 22px 18px;
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: linear-gradient(180deg, rgba(22, 28, 24, .98), rgba(15, 20, 18, .98));
+      box-shadow: 0 24px 56px rgba(0, 0, 0, .55);
+      color: var(--ink);
+    }
+    .record-dialog .card::before {
+      content: "";
+      position: absolute;
+      inset: 0 0 auto 0;
+      height: 3px;
+      border-radius: 20px 20px 0 0;
+      background: linear-gradient(90deg, var(--accent), var(--route));
+    }
+    .record-dialog .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+    .record-dialog .header .badge {
+      display: inline-grid;
+      place-items: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 8px;
+      background: rgba(255, 87, 87, .15);
+      color: #ff8585;
+    }
+    .record-dialog h2 {
+      margin: 0;
+      font-size: 17px;
+      letter-spacing: -.01em;
+    }
+    .record-dialog .close {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      width: 32px;
+      height: 32px;
+      border: 0;
+      border-radius: 9px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 22px;
+      line-height: 1;
+    }
+    .record-dialog .close:hover { background: rgba(255, 255, 255, .08); color: var(--ink); }
+    .record-dialog .meta {
+      display: flex;
+      gap: 8px;
+      margin: 0 0 14px;
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+    .record-dialog .meta > span {
+      padding: 4px 9px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--ink);
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    .record-dialog video {
+      width: 100%;
+      max-height: 44vh;
+      border-radius: 12px;
+      background: #000;
+      display: block;
+    }
+    .record-dialog .actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 16px;
+    }
+    .record-dialog button {
+      flex: 1;
+      height: 46px;
+      padding: 0 14px;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: rgba(255, 255, 255, .06);
+      color: var(--ink);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 750;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      transition: background .15s, transform .05s;
+    }
+    .record-dialog button:active { transform: scale(.98); }
+    .record-dialog button.save {
+      background: var(--accent);
+      border-color: transparent;
+      color: #111815;
+      box-shadow: 0 6px 20px rgba(201, 255, 69, .25);
+    }
+    .record-dialog button.save:hover { background: #d6ff5d; }
+    .record-dialog button.discard:hover { background: rgba(255, 255, 255, .12); }
+    .record-dialog button:disabled { opacity: .55; cursor: progress; }
+    .record-dialog .fallback-note {
+      display: none;
+      margin: 12px 0 0;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, .05);
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+    .record-dialog .fallback-note.show { display: block; }
+</style>
 </head>
 <body>
   <div id="map" aria-label="Animated GPX or FIT route map"></div>
@@ -477,6 +685,12 @@
               <span class="switch-track" aria-hidden="true"></span>
               Follow
             </label>
+            <label class="marker-toggle record-toggle" for="record-toggle">
+              <input id="record-toggle" type="checkbox">
+              <span class="switch-track" aria-hidden="true"></span>
+              <span class="record-toggle-dot" aria-hidden="true"></span>
+              Record video
+            </label>
           </div>
           <label class="import-button">
             Choose GPX/FIT
@@ -498,6 +712,7 @@
 
   <script src="https://unpkg.com/maplibre-gl@5.19.0/dist/maplibre-gl.js"></script>
   <script>__ROUTE_CORE_BUNDLE__</script>
+  <script>__ROUTE_RECORDER_BUNDLE__</script>
   <script type="module">
     const $ = (selector) => document.querySelector(selector);
     const ui = {
@@ -508,6 +723,7 @@
       restart: $('#restart'), progress: $('#progress'), speed: $('#speed'),
       markerToggle: $('#marker-toggle'), endpointToggle: $('#endpoint-toggle'),
       view3dToggle: $('#view-3d-toggle'), followToggle: $('#follow-toggle'),
+      recordToggle: $('#record-toggle'),
       dashboard: $('#dashboard'), emptyState: $('#empty-state'), status: $('#status'),
       fileInputs: [...document.querySelectorAll('.gpx-input')]
     };
@@ -529,7 +745,7 @@
       pitch: 0,
       maxPitch: 65,
       attributionControl: true,
-      canvasContextAttributes: { antialias: true },
+      canvasContextAttributes: { antialias: true, preserveDrawingBuffer: true },
       transformRequest(url) {
         if (!hasMapTilerKey) return { url };
         const requestUrl = new URL(url);
@@ -562,7 +778,7 @@
     let view3dEnabled = false;
     const replayDuration = 50;
     const routeStore = { database: 'gpx-route-replay', store: 'routes', key: 'current' };
-    const preferenceDefaultsVersion = '3';
+    const preferenceDefaultsVersion = '4';
 
     const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
     const savePreference = (key, value) => {
@@ -774,11 +990,184 @@
       setTimeout(() => map.resize(), 220);
     }
 
+    const { isRecordingSupported, createMapRecorder } = RouteRecorder;
+    const recordingSupported = isRecordingSupported();
+    let recorder = null;
+    let pendingResult = null;
+    let routeBaseName = '';
+    const REC_INDICATOR = $('#rec-indicator');
+    const REC_ELAPSED = document.createElement('span');
+    REC_ELAPSED.className = 'rec-elapsed';
+    REC_ELAPSED.setAttribute('aria-hidden', 'true');
+    const RECORD_DIALOG = $('#record-dialog');
+    const RECORD_VIDEO = $('#record-dialog-video');
+    const RECORD_DURATION = $('#record-dialog-duration');
+    const RECORD_SIZE = $('#record-dialog-size');
+    const RECORD_RESOLUTION = $('#record-dialog-resolution');
+    const RECORD_SAVE = $('#record-dialog-save');
+    const RECORD_DISCARD = $('#record-dialog-discard');
+    const RECORD_CLOSE = $('#record-dialog-close');
+    const RECORD_FALLBACK = $('#record-dialog-fallback');
+
+    const setRecIndicator = (on) => {
+      if (on && !REC_INDICATOR.contains(REC_ELAPSED)) {
+        REC_INDICATOR.append(' ', REC_ELAPSED);
+        recordTick();
+      }
+      REC_INDICATOR.classList.toggle('active', on);
+    };
+    let recordTicker = 0;
+    const recordTick = () => {
+      if (recorder && recorder.isRecording && recorder.isRecording()) {
+        REC_ELAPSED.textContent = formatDuration(performance.now() - (currentRecordingStart || performance.now()));
+        recordTicker = requestAnimationFrame(recordTick);
+      }
+    };
+    let currentRecordingStart = 0;
+
+    const formatBytes = (bytes) => {
+      if (!Number.isFinite(bytes)) return '';
+      if (bytes < 1024) return `${bytes} B`;
+      if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+      return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+    };
+    const formatDuration = (ms) => {
+      const total = Math.max(0, Math.round(ms / 1000));
+      const m = Math.floor(total / 60);
+      const s = total % 60;
+      return `${m}:${String(s).padStart(2, '0')}`;
+    };
+
+    const closeRecordDialog = () => {
+      if (!RECORD_DIALOG.classList.contains('open')) return;
+      RECORD_DIALOG.classList.remove('open');
+      RECORD_VIDEO.pause();
+      if (RECORD_VIDEO.src) {
+        URL.revokeObjectURL(RECORD_VIDEO.src);
+        RECORD_VIDEO.removeAttribute('src');
+        RECORD_VIDEO.load();
+      }
+      RECORD_FALLBACK.classList.remove('show');
+      RECORD_FALLBACK.textContent = '';
+      pendingResult = null;
+    };
+
+    const showRecordDialog = (result) => {
+      pendingResult = result;
+      RECORD_DURATION.textContent = formatDuration(result.durationMs);
+      RECORD_SIZE.textContent = formatBytes(result.blob.size);
+      RECORD_RESOLUTION.textContent = `${result.width}×${result.height}`;
+      RECORD_VIDEO.src = result.url;
+      RECORD_VIDEO.muted = true;
+      RECORD_SAVE.disabled = false;
+      RECORD_DISCARD.disabled = false;
+      RECORD_CLOSE.disabled = false;
+      RECORD_DIALOG.classList.add('open');
+      try { RECORD_VIDEO.play(); } catch {}
+    };
+
+    const canShareRecording = (file) => {
+      if (typeof navigator === 'undefined' || !navigator.canShare || !navigator.share) return false;
+      try { return navigator.canShare({ files: [file] }); } catch { return false; }
+    };
+
+    const saveRecording = async () => {
+      if (!pendingResult) return;
+      const file = new File([pendingResult.blob], pendingResult.fileName, { type: pendingResult.mimeType });
+      if (canShareRecording(file)) {
+        try {
+          await navigator.share({ files: [file], title: 'Route replay video' });
+          closeRecordDialog();
+          setStatus('Recording shared.');
+          return;
+        } catch (error) {
+          if (error && error.name === 'AbortError') return;
+          RECORD_FALLBACK.textContent = 'Sharing was cancelled. Falling back to download.';
+          RECORD_FALLBACK.classList.add('show');
+        }
+      }
+      const link = document.createElement('a');
+      link.href = pendingResult.url;
+      link.download = pendingResult.fileName;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setStatus(`Saved ${pendingResult.fileName} (${formatBytes(pendingResult.blob.size)}).`);
+      closeRecordDialog();
+    };
+
+    RECORD_SAVE.addEventListener('click', saveRecording);
+    RECORD_DISCARD.addEventListener('click', closeRecordDialog);
+    RECORD_CLOSE.addEventListener('click', closeRecordDialog);
+    RECORD_DIALOG.addEventListener('click', (event) => {
+      if (event.target === RECORD_DIALOG) closeRecordDialog();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && RECORD_DIALOG.classList.contains('open')) closeRecordDialog();
+    });
+
+    const createRecorderInstance = () => {
+      if (!recordingSupported || !mapReady) return null;
+      const canvas = map.getCanvas();
+      return createMapRecorder(canvas, {
+        fps: 30,
+        bitrate: 5_000_000,
+        routeName: routeBaseName
+      });
+    };
+
+    const startRecording = async () => {
+      if (recorder || !recordingSupported || !ui.recordToggle.checked) return;
+      if (!mapReady) {
+        await mapLoaded;
+      }
+      const instance = createRecorderInstance();
+      if (!instance) return;
+      try {
+        await instance.start();
+        recorder = instance;
+        currentRecordingStart = performance.now();
+        setRecIndicator(true);
+      } catch (error) {
+        console.warn('Recorder: failed to start', error);
+        setStatus(`Recording unavailable: ${error.message}`);
+      }
+    };
+
+    const stopRecordingAndPrompt = async () => {
+      setRecIndicator(false);
+      if (recordTicker) cancelAnimationFrame(recordTicker);
+      recordTicker = 0;
+      REC_ELAPSED.textContent = '';
+      if (!recorder) return;
+      const instance = recorder;
+      recorder = null;
+      const result = await instance.stop();
+      if (result && result.blob && result.blob.size > 0) {
+        showRecordDialog(result);
+      } else {
+        setStatus('Recording was empty.');
+      }
+    };
+
+    const discardRecording = () => {
+      if (!recorder) return;
+      setRecIndicator(false);
+      recorder.discard();
+      recorder = null;
+    };
+
     function setPlayState(nextPlaying) {
+      const wasPlaying = playing;
       playing = nextPlaying;
       for (const button of ui.playButtons) {
         button.textContent = playing ? 'Ⅱ' : '▶';
         button.setAttribute('aria-label', playing ? 'Pause route' : progress >= 1 ? 'Replay route' : 'Play route');
+      }
+      if (!wasPlaying && playing) {
+        startRecording();
+      } else if (wasPlaying && !playing) {
+        stopRecordingAndPrompt();
       }
     }
 
@@ -909,7 +1298,9 @@
     }
 
     async function setup(track, fileName) {
+      discardRecording();
       setPlayState(false);
+      routeBaseName = (fileName || 'route-replay').replace(/\.[^.]+$/, '');
       progress = 0;
       lastFrame = 0;
       completedRoute = [];
@@ -1148,14 +1539,28 @@
       ui.markerToggle.checked = false;
       ui.view3dToggle.checked = true;
       ui.followToggle.checked = true;
+      ui.recordToggle.checked = false;
       savePreference('km-markers-enabled', false);
       savePreference('3d-enabled', true);
       savePreference('follow-enabled', true);
+      savePreference('record-enabled', false);
       savePreference('preference-defaults-version', preferenceDefaultsVersion);
     } else {
       ui.markerToggle.checked = readPreference('km-markers-enabled') === 'true';
       ui.view3dToggle.checked = readPreference('3d-enabled') !== 'false';
       ui.followToggle.checked = readPreference('follow-enabled') !== 'false';
+      ui.recordToggle.checked = readPreference('record-enabled') === 'true';
+    }
+    if (!recordingSupported) {
+      ui.recordToggle.disabled = true;
+      ui.recordToggle.parentElement.title = 'Recording is not supported in this browser (Safari 16.4+ or Chrome recommended).';
+    } else {
+      ui.recordToggle.addEventListener('change', () => {
+        savePreference('record-enabled', ui.recordToggle.checked);
+        setStatus(ui.recordToggle.checked
+          ? 'Recording will start with the next Play.'
+          : 'Recording disabled. Reloads the next Play start.');
+      });
     }
     view3dEnabled = ui.view3dToggle.checked;
 
@@ -1168,5 +1573,32 @@
       })
       .catch(() => setStatus('Choose a GPX or FIT file to begin.'));
   </script>
+
+  <div class="rec-indicator" id="rec-indicator" aria-live="polite" aria-label="Recording in progress">
+    <span class="dot" aria-hidden="true"></span>
+    REC
+  </div>
+
+  <div class="record-dialog" id="record-dialog" role="dialog" aria-modal="true" aria-labelledby="record-dialog-title">
+    <div class="card">
+      <button type="button" class="close" id="record-dialog-close" aria-label="Close">×</button>
+      <div class="header">
+        <span class="badge" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="6" width="13" height="12" rx="2"></rect>
+            <path d="m22 8-6 4 6 4z"></path>
+          </svg>
+        </span>
+        <h2 id="record-dialog-title">Save replay video?</h2>
+      </div>
+      <p class="meta" id="record-dialog-meta"><span id="record-dialog-duration">—</span><span id="record-dialog-size">—</span><span id="record-dialog-resolution">—</span></p>
+      <video id="record-dialog-video" controls playsinline></video>
+      <p class="fallback-note" id="record-dialog-fallback"></p>
+      <div class="actions">
+        <button type="button" class="discard" id="record-dialog-discard">Discard</button>
+        <button type="button" class="save" id="record-dialog-save">Save</button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>

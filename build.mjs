@@ -24,8 +24,13 @@ const routeCoreBundle = await bundle({
   entryPoints: ['route-core.mjs'],
   globalName: 'RouteCore'
 });
+const routeRecorderBundle = await bundle({
+  entryPoints: ['route-recorder.mjs'],
+  globalName: 'RouteRecorder'
+});
 const html = (await readFile('index.html', 'utf8'))
-  .replace('__ROUTE_CORE_BUNDLE__', routeCoreBundle);
+  .replace('__ROUTE_CORE_BUNDLE__', routeCoreBundle)
+  .replace('__ROUTE_RECORDER_BUNDLE__', routeRecorderBundle);
 const pagesHtml = html
   .replaceAll('__SITE_ORIGIN__', 'https://stanleycheng.github.io/gpx_route')
   .replaceAll('__MAPTILER_KEY__', '')
