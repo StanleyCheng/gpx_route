@@ -20,12 +20,16 @@ const SUPPORTED_CODECS = [
   'avc1.640028'  // H.264 high 4.0
 ];
 
-const pickCodec = (width, height, bitrate, framerate) => {
+const pickCodec = async (width, height, bitrate, framerate) => {
   for (const codec of SUPPORTED_CODECS) {
-    const support = VideoEncoder.isConfigSupported({
-      codec, width, height, bitrate, framerate
-    });
-    if (support && support.supported) return codec;
+    try {
+      const support = await VideoEncoder.isConfigSupported({
+        codec, width, height, bitrate, framerate
+      });
+      if (support && support.supported) return codec;
+    } catch {
+      // try the next candidate
+    }
   }
   return null;
 };
@@ -61,9 +65,9 @@ export function createMapRecorder(canvas, {
     if (recording) return;
     width = canvas.width;
     height = canvas.height;
-    codec = pickCodec(width, height, bitrate, fps);
+    codec = await pickCodec(width, height, bitrate, fps);
     if (!codec) {
-      throw new Error('No supported H.264 encoder configuration was found for this canvas.');
+      throw new Error('No supported H.264 encoder configuration was found for this browser.');
     }
     muxer = new Muxer({
       target: new ArrayBufferTarget(),
