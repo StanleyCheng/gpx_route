@@ -1141,60 +1141,23 @@
       pendingResult = null;
     };
 
-    // Decode the final frame of a recorded blob into a data: URL so the
-    // save-or-discard dialog can show a static thumbnail instead of an
-    // animated video preview.
-    const captureFinalFrame = (blob) => new Promise((resolve) => {
-      if (typeof document === 'undefined' || !blob) return resolve(null);
-      const probe = document.createElement('video');
-      probe.muted = true;
-      probe.playsInline = true;
-      probe.preload = 'auto';
-      probe.crossOrigin = 'anonymous';
-      const url = URL.createObjectURL(blob);
-      probe.src = url;
-      let resolved = false;
-      const finish = (dataUrl) => {
-        if (resolved) return;
-        resolved = true;
-        try { URL.revokeObjectURL(url); } catch {}
-        probe.removeAttribute('src');
-        probe.load();
-        resolve(dataUrl);
-      };
-      probe.addEventListener('error', () => finish(null));
-      const draw = () => {
-        const w = probe.videoWidth;
-        const h = probe.videoHeight;
-        if (!w || !h) return finish(null);
-        try {
-          const out = document.createElement('canvas');
-          out.width = w;
-          out.height = h;
-          const ctx = out.getContext('2d');
-          ctx.drawImage(probe, 0, 0, w, h);
-          finish(out.toDataURL('image/jpeg', 0.85));
-        } catch {
-          finish(null);
-        }
-      };
-      probe.addEventListener('loadedmetadata', () => {
-        const target = Math.max(0, (probe.duration || 0) - 0.1);
-        if (!Number.isFinite(target) || target <= 0) {
-          // Some webm blobs have NaN duration — fall back to "loadeddata"
-          return;
-        }
-        try { probe.currentTime = target; } catch { draw(); }
-      });
-      probe.addEventListener('seeked', draw);
-      // Fallback if duration/seek never reports
-      probe.addEventListener('loadeddata', () => {
-        if (!resolved && (probe.videoWidth || 0) > 0) draw();
-      });
-      setTimeout(() => { if (!resolved) draw(); }, 4000);
-    });
+    // Snapshot the recording canvas synchronously. MediaRecorder was
+    // reading from captureCompositor.getCanvas(), so whatever it draws
+    // right now is visually identical to the video's last frame — and
+    // we never have to decode the MP4/WebM in a hidden <video>, which
+    // is what failed on iOS Safari.
+    const captureCanvasSnapshot = () => {
+      if (!captureCompositor) return null;
+      const compCanvas = captureCompositor.getCanvas();
+      if (!compCanvas || !compCanvas.width || !compCanvas.height) return null;
+      try {
+        return compCanvas.toDataURL('image/jpeg', 0.85);
+      } catch {
+        return null;
+      }
+    };
 
-    const showRecordDialog = async (result) => {
+    const showRecordDialog = (result, thumbnail) => {
       pendingResult = result;
       RECORD_DURATION.textContent = formatDuration(result.durationMs);
       RECORD_SIZE.textContent = formatBytes(result.blob.size);
@@ -1204,11 +1167,12 @@
       RECORD_SAVE.disabled = false;
       RECORD_DISCARD.disabled = false;
       RECORD_CLOSE.disabled = false;
-      const dataUrl = await captureFinalFrame(result.blob);
-      if (dataUrl) {
-        RECORD_PREVIEW.src = dataUrl;
+      if (thumbnail) {
+        RECORD_PREVIEW.src = thumbnail;
         RECORD_PREVIEW_FALLBACK.classList.remove('show');
       } else {
+        RECORD_PREVIEW.removeAttribute('src');
+        RECORD_PREVIEW_FALLBACK.textContent = 'Preview unavailable — the recording saved successfully.';
         RECORD_PREVIEW_FALLBACK.classList.add('show');
       }
       RECORD_DIALOG.classList.add('open');
@@ -1221,27 +1185,61 @@
 
     const saveRecording = async () => {
       if (!pendingResult) return;
-      const file = new File([pendingResult.blob], pendingResult.fileName, { type: pendingResult.mimeType });
+      const { blob, fileName, mimeType } = pendingResult;
+      RECORD_SAVE.disabled = true;
+      const restoreSave = () => { RECORD_SAVE.disabled = false; };
+
+      // 1. File System Access API (Chrome 86+, Edge). On macOS this opens
+      //    the native save picker so the user has an explicit destination.
+      //    Requires a secure context (HTTPS, which GH Pages serves).
+      if (typeof window !== 'undefined' && window.isSecureContext && typeof window.showSaveFilePicker === 'function') {
+        try {
+          const ext = mimeType === 'video/mp4' ? '.mp4' : '.webm';
+          const handle = await window.showSaveFilePicker({
+            suggestedName: fileName,
+            types: [{ description: 'Video recording', accept: { [mimeType]: [ext] } }]
+          });
+          const writable = await handle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+          closeRecordDialog();
+          setStatus(`Saved ${handle.name || fileName} (${formatBytes(blob.size)}).`);
+          return;
+        } catch (err) {
+          if (err && err.name === 'AbortError') { restoreSave(); setStatus('Save cancelled.'); return; }
+          console.warn('showSaveFilePicker failed, falling back:', err);
+          // Falls through to share / download path.
+        }
+      }
+
+      // 2. Web Share API (Safari mac/iOS, mobile Chrome). Opens the
+      //    share sheet so the user can drop the file into Photos,
+      //    Messages, Finder, etc.
+      const file = new File([blob], fileName, { type: mimeType });
       if (canShareRecording(file)) {
         try {
           await navigator.share({ files: [file], title: 'Route replay video' });
           closeRecordDialog();
-          setStatus('Recording shared.');
+          setStatus(`Saved ${fileName} (${formatBytes(blob.size)}).`);
           return;
-        } catch (error) {
-          if (error && error.name === 'AbortError') return;
+        } catch (err) {
+          if (err && err.name === 'AbortError') { restoreSave(); return; }
           RECORD_FALLBACK.textContent = 'Sharing was cancelled. Falling back to download.';
           RECORD_FALLBACK.classList.add('show');
         }
       }
+
+      // 3. Anchor download fallback (Firefox, older Chrome, or when
+      //    the user dismissed the share sheet). Chrome downloads to
+      //    ~/Downloads/ on macOS by default.
       const link = document.createElement('a');
       link.href = pendingResult.url;
-      link.download = pendingResult.fileName;
+      link.download = fileName;
       document.body.append(link);
       link.click();
       link.remove();
-      setStatus(`Saved ${pendingResult.fileName} (${formatBytes(pendingResult.blob.size)}).`);
       closeRecordDialog();
+      setStatus(`Downloaded ${fileName} (${formatBytes(blob.size)}) — check your Downloads folder.`);
     };
 
     RECORD_SAVE.addEventListener('click', saveRecording);
@@ -1300,7 +1298,8 @@
       const result = await instance.stop();
       if (captureCompositor) captureCompositor.stop();
       if (result && result.blob && result.blob.size > 0) {
-        showRecordDialog(result);
+        const thumbnail = captureCanvasSnapshot();
+        showRecordDialog(result, thumbnail);
       } else {
         showRecError('Recording was empty — start the playback first, then stop.');
         setStatus('Recording was empty.');
