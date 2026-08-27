@@ -11,6 +11,9 @@
   <title>GPX/FIT Route Replay</title>
   <link rel="icon" type="image/png" sizes="192x192" href="./favicon.png?v=1">
   <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png?v=1">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@700;800&family=Manrope:wght@400;600;700;800&display=swap">
   <link rel="preconnect" href="https://api.maptiler.com">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.19.0/dist/maplibre-gl.css">
   <style>
@@ -32,7 +35,7 @@
       overflow: hidden;
       background: #111815;
       color: var(--ink);
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-family: Manrope, ui-sans-serif, sans-serif;
     }
 
     #map { position: fixed; inset: 0; background: #d9dedb; }
@@ -68,11 +71,11 @@
     .topbar-details { min-width: 0; overflow: hidden; }
     .topbar-toggle {
       position: absolute;
-      top: 10px;
-      right: 10px;
+      top: 4px;
+      right: 4px;
       display: grid;
-      width: 30px;
-      height: 30px;
+      width: 44px;
+      height: 44px;
       place-items: center;
       border: 1px solid var(--line);
       border-radius: 10px;
@@ -84,7 +87,7 @@
     .topbar-toggle::-webkit-details-marker { display: none; }
     .topbar-toggle::before { content: '−'; }
     .topbar:not([open]) { right: auto; width: 44px; height: 44px; margin: 0; padding: 0; border-radius: 13px; }
-    .topbar:not([open]) .topbar-toggle { inset: 0; width: 42px; height: 42px; border: 0; background: transparent; }
+    .topbar:not([open]) .topbar-toggle { inset: 0; width: 44px; height: 44px; border: 0; background: transparent; }
     .topbar:not([open]) .topbar-toggle::before { content: '+'; }
 
     .eyebrow {
@@ -98,13 +101,14 @@
 
     h1 {
       margin: 0;
-      padding-right: 38px;
+      padding-right: 48px;
       overflow: hidden;
       font-size: clamp(24px, 4vw, 42px);
       line-height: .95;
       letter-spacing: -.055em;
       text-overflow: ellipsis;
       white-space: nowrap;
+      font-family: "Barlow Condensed", sans-serif;
     }
 
     .summary {
@@ -138,10 +142,10 @@
 
     .dashboard-collapse {
       position: absolute;
-      top: 8px;
-      right: 9px;
-      width: 34px;
-      height: 30px;
+      top: 4px;
+      right: 4px;
+      width: 44px;
+      height: 44px;
       border-radius: 9px;
       color: var(--muted);
       line-height: 1;
@@ -159,15 +163,15 @@
     .control-panel.collapsed .compact-bar { display: flex; }
 
     .compact-play {
-      width: 42px;
-      flex: 0 0 42px;
+      width: 44px;
+      flex: 0 0 44px;
       border-color: transparent;
       background: var(--accent);
       color: #10150f;
       font-size: 17px;
     }
 
-    .dashboard-expand { width: 42px; flex: 0 0 42px; }
+    .dashboard-expand { width: 44px; flex: 0 0 44px; }
 
     .stats {
       display: grid;
@@ -197,6 +201,7 @@
       font-weight: 720;
       text-overflow: ellipsis;
       white-space: nowrap;
+      font-family: "Barlow Condensed", sans-serif;
     }
 
     .transport {
@@ -214,7 +219,7 @@
     }
 
     button, select {
-      height: 42px;
+      height: 44px;
       border: 1px solid var(--line);
       border-radius: 12px;
       background: rgba(255, 255, 255, .07);
@@ -231,7 +236,7 @@
     [data-play]:hover { background: #dbff84; }
     #speed { width: 72px; padding: 0 4px 0 8px; }
 
-    input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer; }
+    input[type="range"] { width: 100%; height: 44px; accent-color: var(--accent); cursor: pointer; }
 
     .marker-toggle {
       display: flex;
@@ -290,7 +295,7 @@
 
     .import-button {
       display: inline-grid;
-      height: 42px;
+      height: 44px;
       padding: 0 12px;
       place-items: center;
       border: 1px solid var(--line);
@@ -368,11 +373,33 @@
     }
 
     .empty-state[hidden] { display: none; }
-    .empty-state h2 { margin: 0 0 8px; font-size: 24px; letter-spacing: -.035em; }
+    .empty-state h2 { margin: 0 0 8px; font-family: "Barlow Condensed", sans-serif; font-size: 28px; letter-spacing: -.025em; }
     .empty-state p { margin: 0 auto 18px; max-width: 32ch; color: var(--muted); line-height: 1.5; }
     .empty-state .import-button { display: inline-grid; background: var(--accent); color: #10150f; }
     .empty-note { display: block; margin-top: 12px; color: #89928d; font-size: 11px; }
-    .status { position: fixed; overflow: hidden; width: 1px; height: 1px; clip: rect(0 0 0 0); }
+    .status {
+      position: fixed;
+      z-index: 5;
+      top: max(118px, calc(env(safe-area-inset-top) + 96px));
+      left: 50%;
+      width: max-content;
+      max-width: min(560px, calc(100% - 32px));
+      margin: 0;
+      padding: 10px 14px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(15, 20, 18, .94);
+      box-shadow: 0 10px 28px rgba(0, 0, 0, .28);
+      color: var(--ink);
+      font-size: 12px;
+      line-height: 1.4;
+      text-align: center;
+      opacity: 0;
+      pointer-events: none;
+      transform: translate(-50%, -6px);
+      transition: opacity .2s ease, transform .2s ease;
+    }
+    .status.show { opacity: 1; transform: translate(-50%, 0); }
 
     @media (max-width: 580px) {
       .topbar {
@@ -396,7 +423,7 @@
       .control-panel.collapsed { max-width: none; }
       .stats { grid-template-columns: repeat(2, 1fr); row-gap: 12px; }
       .stat:nth-child(3) { border-left: 0; }
-      .transport { grid-template-columns: 42px 42px 1fr 68px; gap: 6px; }
+      .transport { grid-template-columns: 44px 44px 1fr 68px; gap: 6px; }
       #speed { width: 68px; padding-left: 5px; font-size: 12px; }
       .secondary-controls {
         grid-column: 1 / -1;
@@ -406,11 +433,13 @@
         margin-top: 6px;
       }
 
-      .toggle-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 5px; }
+      .toggle-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 5px; }
       .rec-indicator { bottom: calc(max(24px, env(safe-area-inset-bottom)) + 150px); }
-      .marker-toggle { min-width: 0; font-size: 9px; }
-      .secondary-controls .import-button { width: 106px; height: 38px; padding: 0 7px; }
+      .marker-toggle { min-width: 0; min-height: 44px; padding: 0 6px; font-size: 9px; }
+      .record-toggle { grid-column: 1 / -1; border: 1px solid var(--line); border-radius: 12px; background: rgba(255, 255, 255, .04); }
+      .secondary-controls .import-button { width: 106px; height: 44px; padding: 0 7px; }
       .empty-state { top: 46%; width: calc(100% - 32px); }
+      .status { top: max(106px, calc(env(safe-area-inset-top) + 88px)); }
     }
 
     @media (max-width: 390px) {
@@ -422,6 +451,13 @@
     @media (max-height: 700px) and (max-width: 580px) {
       .empty-state { top: 42%; }
       .control-panel:not(.collapsed) .stats { display: none; }
+      .dashboard-collapse {
+        top: -50px;
+        right: 0;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        box-shadow: 0 8px 22px rgba(0, 0, 0, .24);
+      }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -672,7 +708,7 @@
   </details>
 
   <section class="empty-state" id="empty-state">
-    <h2>Open a route from your iPhone</h2>
+    <h2>Open a route from your device</h2>
     <p>Select a GPX or Garmin activity FIT file from Files or iCloud Drive. Your route stays in this browser and is never uploaded.</p>
     <label class="import-button">
       Choose GPX/FIT
@@ -682,8 +718,8 @@
   </section>
 
   <main class="control-panel" id="dashboard" aria-label="Route playback controls">
-    <button class="dashboard-collapse" id="dashboard-collapse" type="button" aria-label="Hide dashboard">⌄</button>
-    <div class="panel-details">
+    <button class="dashboard-collapse" id="dashboard-collapse" type="button" aria-label="Hide dashboard" aria-controls="dashboard-details" aria-expanded="true">⌄</button>
+    <div class="panel-details" id="dashboard-details">
       <section class="stats" aria-live="polite">
         <div class="stat"><span class="label">Distance</span><span class="value" id="distance">0.00 km</span></div>
         <div class="stat"><span class="label">Elapsed</span><span class="value" id="elapsed">0:00</span></div>
@@ -693,7 +729,7 @@
       <section class="transport">
         <button type="button" data-play aria-label="Play route">▶</button>
         <button id="restart" type="button" aria-label="Restart route">↺</button>
-        <input id="progress" type="range" min="0" max="1000" value="0" aria-label="Route progress">
+        <input id="progress" type="range" min="0" max="1000" value="0" aria-label="Route progress" aria-valuetext="No route loaded">
         <select id="speed" aria-label="Playback speed">
           <option value="0.05">0.05×</option>
           <option value="0.1">0.1×</option>
@@ -744,7 +780,7 @@
         <span class="label">Distance</span>
         <span class="value" id="compact-distance">0.00 km</span>
       </div>
-      <button class="dashboard-expand" id="dashboard-expand" type="button" aria-label="Show dashboard">⌃</button>
+      <button class="dashboard-expand" id="dashboard-expand" type="button" aria-label="Show dashboard" aria-controls="dashboard-details" aria-expanded="false">⌃</button>
     </div>
   </main>
   <p class="status" id="status" aria-live="polite"></p>
@@ -765,7 +801,8 @@
       markerToggle: $('#marker-toggle'), endpointToggle: $('#endpoint-toggle'),
       view3dToggle: $('#view-3d-toggle'), followToggle: $('#follow-toggle'),
       recordToggle: $('#record-toggle'),
-      dashboard: $('#dashboard'), emptyState: $('#empty-state'), status: $('#status'),
+      dashboard: $('#dashboard'), dashboardCollapse: $('#dashboard-collapse'), dashboardExpand: $('#dashboard-expand'),
+      emptyState: $('#empty-state'), status: $('#status'),
       fileInputs: [...document.querySelectorAll('.gpx-input')]
     };
 
@@ -1064,6 +1101,8 @@
 
     function setDashboardCollapsed(collapsed) {
       ui.dashboard.classList.toggle('collapsed', collapsed);
+      ui.dashboardCollapse.setAttribute('aria-expanded', String(!collapsed));
+      ui.dashboardExpand.setAttribute('aria-expanded', String(!collapsed));
       try { localStorage.setItem('dashboard-collapsed', String(collapsed)); } catch {}
       setTimeout(() => map.resize(), 220);
     }
@@ -1342,7 +1381,13 @@
       }
     }
 
-    function setStatus(message) { ui.status.textContent = message; }
+    let statusTimer = 0;
+    function setStatus(message) {
+      ui.status.textContent = message;
+      ui.status.classList.toggle('show', Boolean(message));
+      if (statusTimer) clearTimeout(statusTimer);
+      if (message) statusTimer = setTimeout(() => ui.status.classList.remove('show'), 4500);
+    }
     const gpsFilterStatus = (track) => GPS_SPEED_FILTER_ENABLED
       ? `${track.removedPoints} GPS points faster than ${MAX_ALLOWED_SPEED_KILOMETERS_PER_HOUR} km/h were filtered.`
       : 'GPS speed filtering is off.';
@@ -1598,8 +1643,11 @@
         type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [current.lon, current.lat] }
       });
       ui.progress.value = Math.round(progress * 1000);
-      ui.distance.textContent = ui.compactDistance.textContent = `${(current.distance / 1000).toFixed(2)} km`;
-      ui.elapsed.textContent = formatTime(progress * totalDuration);
+      const currentDistance = `${(current.distance / 1000).toFixed(2)} km`;
+      const elapsedTime = formatTime(progress * totalDuration);
+      ui.distance.textContent = ui.compactDistance.textContent = currentDistance;
+      ui.elapsed.textContent = elapsedTime;
+      ui.progress.setAttribute('aria-valuetext', `${currentDistance} of ${(totalDistance / 1000).toFixed(2)} km, ${elapsedTime} elapsed`);
       ui.elevation.textContent = Number.isFinite(current.ele) ? `${Math.round(current.ele)} m` : '—';
       ui.heartRate.textContent = Number.isFinite(current.hr) ? `${current.hr} bpm` : '—';
       updateMileageMarkers(current.distance);
@@ -1659,8 +1707,8 @@
     });
     map.on('render', drawRouteOverlay);
     map.on('resize', drawRouteOverlay);
-    $('#dashboard-collapse').addEventListener('click', () => setDashboardCollapsed(true));
-    $('#dashboard-expand').addEventListener('click', () => setDashboardCollapsed(false));
+    ui.dashboardCollapse.addEventListener('click', () => setDashboardCollapsed(true));
+    ui.dashboardExpand.addEventListener('click', () => setDashboardCollapsed(false));
 
     for (const eventName of ['dragstart', 'rotatestart', 'pitchstart']) {
       map.on(eventName, (event) => {
