@@ -594,13 +594,27 @@
       font-weight: 700;
       font-variant-numeric: tabular-nums;
     }
+    .record-dialog .preview,
     .record-dialog video {
       width: 100%;
       max-height: 44vh;
       border-radius: 12px;
       background: #000;
       display: block;
+      object-fit: contain;
     }
+    .record-dialog .preview-fallback {
+      display: none;
+      margin: 16px 0 0;
+      padding: 18px 16px;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, .04);
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+      text-align: center;
+    }
+    .record-dialog .preview-fallback.show { display: block; }
     .record-dialog .actions {
       display: flex;
       gap: 10px;
@@ -784,6 +798,43 @@
     const routeOverlay = document.createElement('canvas');
     routeOverlay.className = 'route-overlay';
     map.getContainer().append(routeOverlay);
+
+    const captureCompositor = (() => {
+      if (typeof document === 'undefined') return null;
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      let active = false;
+      let raf = 0;
+      const step = () => {
+        if (!active) return;
+        const mapCanvas = map.getCanvas();
+        const mapW = mapCanvas.width;
+        const mapH = mapCanvas.height;
+        if (mapW > 0 && mapH > 0) {
+          if (canvas.width !== mapW || canvas.height !== mapH) {
+            canvas.width = mapW;
+            canvas.height = mapH;
+          }
+          context.clearRect(0, 0, canvas.width, canvas.height);
+          context.drawImage(mapCanvas, 0, 0);
+          if (routeOverlay && routeOverlay.width > 0 && routeOverlay.height > 0) {
+            context.drawImage(routeOverlay, 0, 0);
+          }
+        }
+        raf = requestAnimationFrame(step);
+      };
+      return {
+        start() { if (active) return; active = true; raf = requestAnimationFrame(step); },
+        stop() { active = false; if (raf) cancelAnimationFrame(raf); raf = 0; },
+        reset() {
+          active = false;
+          if (raf) cancelAnimationFrame(raf);
+          raf = 0;
+          if (canvas.width && canvas.height) context.clearRect(0, 0, canvas.width, canvas.height);
+        },
+        getCanvas: () => canvas
+      };
+    })();
 
     let mapReady = false;
     let points = [];
@@ -1025,7 +1076,8 @@
     REC_ELAPSED.className = 'rec-elapsed';
     REC_ELAPSED.setAttribute('aria-hidden', 'true');
     const RECORD_DIALOG = $('#record-dialog');
-    const RECORD_VIDEO = $('#record-dialog-video');
+    const RECORD_PREVIEW = $('#record-dialog-preview');
+    const RECORD_PREVIEW_FALLBACK = $('#record-dialog-preview-fallback');
     const RECORD_DURATION = $('#record-dialog-duration');
     const RECORD_SIZE = $('#record-dialog-size');
     const RECORD_RESOLUTION = $('#record-dialog-resolution');
@@ -1074,32 +1126,92 @@
       return `${m}:${String(s).padStart(2, '0')}`;
     };
 
+    let previewFrameUrl = null;
     const closeRecordDialog = () => {
       if (!RECORD_DIALOG.classList.contains('open')) return;
       RECORD_DIALOG.classList.remove('open');
-      RECORD_VIDEO.pause();
-      if (RECORD_VIDEO.src) {
-        URL.revokeObjectURL(RECORD_VIDEO.src);
-        RECORD_VIDEO.removeAttribute('src');
-        RECORD_VIDEO.load();
+      if (RECORD_PREVIEW.src) RECORD_PREVIEW.removeAttribute('src');
+      if (previewFrameUrl) {
+        try { URL.revokeObjectURL(previewFrameUrl); } catch {}
+        previewFrameUrl = null;
       }
       RECORD_FALLBACK.classList.remove('show');
       RECORD_FALLBACK.textContent = '';
+      RECORD_PREVIEW_FALLBACK.classList.remove('show');
       pendingResult = null;
     };
 
-    const showRecordDialog = (result) => {
+    // Decode the final frame of a recorded blob into a data: URL so the
+    // save-or-discard dialog can show a static thumbnail instead of an
+    // animated video preview.
+    const captureFinalFrame = (blob) => new Promise((resolve) => {
+      if (typeof document === 'undefined' || !blob) return resolve(null);
+      const probe = document.createElement('video');
+      probe.muted = true;
+      probe.playsInline = true;
+      probe.preload = 'auto';
+      probe.crossOrigin = 'anonymous';
+      const url = URL.createObjectURL(blob);
+      probe.src = url;
+      let resolved = false;
+      const finish = (dataUrl) => {
+        if (resolved) return;
+        resolved = true;
+        try { URL.revokeObjectURL(url); } catch {}
+        probe.removeAttribute('src');
+        probe.load();
+        resolve(dataUrl);
+      };
+      probe.addEventListener('error', () => finish(null));
+      const draw = () => {
+        const w = probe.videoWidth;
+        const h = probe.videoHeight;
+        if (!w || !h) return finish(null);
+        try {
+          const out = document.createElement('canvas');
+          out.width = w;
+          out.height = h;
+          const ctx = out.getContext('2d');
+          ctx.drawImage(probe, 0, 0, w, h);
+          finish(out.toDataURL('image/jpeg', 0.85));
+        } catch {
+          finish(null);
+        }
+      };
+      probe.addEventListener('loadedmetadata', () => {
+        const target = Math.max(0, (probe.duration || 0) - 0.1);
+        if (!Number.isFinite(target) || target <= 0) {
+          // Some webm blobs have NaN duration — fall back to "loadeddata"
+          return;
+        }
+        try { probe.currentTime = target; } catch { draw(); }
+      });
+      probe.addEventListener('seeked', draw);
+      // Fallback if duration/seek never reports
+      probe.addEventListener('loadeddata', () => {
+        if (!resolved && (probe.videoWidth || 0) > 0) draw();
+      });
+      setTimeout(() => { if (!resolved) draw(); }, 4000);
+    });
+
+    const showRecordDialog = async (result) => {
       pendingResult = result;
       RECORD_DURATION.textContent = formatDuration(result.durationMs);
       RECORD_SIZE.textContent = formatBytes(result.blob.size);
       RECORD_RESOLUTION.textContent = `${result.width}×${result.height}`;
-      RECORD_VIDEO.src = result.url;
-      RECORD_VIDEO.muted = true;
+      RECORD_PREVIEW.removeAttribute('src');
+      RECORD_PREVIEW_FALLBACK.classList.remove('show');
       RECORD_SAVE.disabled = false;
       RECORD_DISCARD.disabled = false;
       RECORD_CLOSE.disabled = false;
+      const dataUrl = await captureFinalFrame(result.blob);
+      if (dataUrl) {
+        RECORD_PREVIEW.src = dataUrl;
+        RECORD_PREVIEW_FALLBACK.classList.remove('show');
+      } else {
+        RECORD_PREVIEW_FALLBACK.classList.add('show');
+      }
       RECORD_DIALOG.classList.add('open');
-      try { RECORD_VIDEO.play(); } catch {}
     };
 
     const canShareRecording = (file) => {
@@ -1143,9 +1255,10 @@
     });
 
     const createRecorderInstance = () => {
-      if (!recordingSupported || !mapReady) return null;
-      const canvas = map.getCanvas();
-      return createMapRecorder(canvas, {
+      if (!recordingSupported || !mapReady || !captureCompositor) return null;
+      captureCompositor.reset();
+      captureCompositor.start();
+      return createMapRecorder(captureCompositor.getCanvas(), {
         fps: 30,
         bitrate: 5_000_000,
         routeName: routeBaseName
@@ -1154,6 +1267,7 @@
 
     const startRecording = async () => {
       if (recorder || !recordingSupported || !ui.recordToggle.checked) return;
+      cancelPendingStop();
       if (!mapReady) {
         await mapLoaded;
       }
@@ -1171,6 +1285,10 @@
       }
     };
 
+    let pendingStopTimer = 0;
+    const cancelPendingStop = () => {
+      if (pendingStopTimer) { clearTimeout(pendingStopTimer); pendingStopTimer = 0; }
+    };
     const stopRecordingAndPrompt = async () => {
       setRecIndicator(false);
       if (recordTicker) cancelAnimationFrame(recordTicker);
@@ -1180,6 +1298,7 @@
       const instance = recorder;
       recorder = null;
       const result = await instance.stop();
+      if (captureCompositor) captureCompositor.stop();
       if (result && result.blob && result.blob.size > 0) {
         showRecordDialog(result);
       } else {
@@ -1189,13 +1308,14 @@
     };
 
     const discardRecording = () => {
-      if (!recorder) return;
+      if (!recorder) { if (captureCompositor) captureCompositor.stop(); return; }
       setRecIndicator(false);
       recorder.discard();
       recorder = null;
+      if (captureCompositor) captureCompositor.stop();
     };
 
-    function setPlayState(nextPlaying) {
+    function setPlayState(nextPlaying, { naturalEnd = false } = {}) {
       const wasPlaying = playing;
       playing = nextPlaying;
       for (const button of ui.playButtons) {
@@ -1204,8 +1324,20 @@
       }
       if (!wasPlaying && playing) {
         startRecording();
-      } else if (wasPlaying && !playing) {
-        stopRecordingAndPrompt();
+      } else if (wasPlaying && !playing && recorder) {
+        if (naturalEnd) {
+          // Natural completion at 100%: zoom out and let the recording
+          // capture the animation before we hand the user a save dialog.
+          endOfReplayZoom();
+          const zoomMs = reducedMotion ? 0 : endOfReplayDuration;
+          cancelPendingStop();
+          pendingStopTimer = setTimeout(() => {
+            pendingStopTimer = 0;
+            stopRecordingAndPrompt();
+          }, zoomMs + 100);
+        } else {
+          stopRecordingAndPrompt();
+        }
       }
     }
 
@@ -1323,16 +1455,20 @@
       return new maplibregl.Marker({ element, anchor: 'center', opacityWhenCovered: 1 }).setLngLat([point.lon, point.lat]);
     }
 
-    function fitRouteOverview(duration = 800) {
+    const endOfReplayDuration = 1800;
+    function fitRouteOverview({ duration = 800, pitch = 0 } = {}) {
       const bounds = new maplibregl.LngLatBounds();
       displayPoints.forEach((point) => bounds.extend([point.lon, point.lat]));
       map.fitBounds(bounds, {
         padding: { top: 110, right: 55, bottom: ui.dashboard.classList.contains('collapsed') ? 100 : 260, left: 55 },
         bearing: 0,
-        pitch: 0,
+        pitch,
         duration: reducedMotion ? 0 : duration,
         essential: false
       });
+    }
+    function endOfReplayZoom() {
+      fitRouteOverview({ duration: endOfReplayDuration, pitch: view3dEnabled ? 30 : 0 });
     }
 
     async function setup(track, fileName) {
@@ -1475,8 +1611,7 @@
       render(progress + ((timestamp - lastFrame) / 1000 / replayDuration) * speed);
       lastFrame = timestamp;
       if (progress >= 1) {
-        setPlayState(false);
-        if (ui.followToggle.checked) fitRouteOverview(1200);
+        setPlayState(false, { naturalEnd: true });
         return;
       }
       requestAnimationFrame(frame);
@@ -1631,7 +1766,8 @@
         <h2 id="record-dialog-title">Save replay video?</h2>
       </div>
       <p class="meta" id="record-dialog-meta"><span id="record-dialog-duration">—</span><span id="record-dialog-size">—</span><span id="record-dialog-resolution">—</span></p>
-      <video id="record-dialog-video" controls playsinline></video>
+      <img id="record-dialog-preview" class="preview" alt="Final frame of the replay recording">
+      <p class="preview-fallback" id="record-dialog-preview-fallback">Preview unavailable — the recording saved successfully.</p>
       <p class="fallback-note" id="record-dialog-fallback"></p>
       <div class="actions">
         <button type="button" class="discard" id="record-dialog-discard">Discard</button>
