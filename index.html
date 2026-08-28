@@ -812,6 +812,15 @@
     const mapStyle = hasMapTilerKey
       ? 'https://api.maptiler.com/maps/streets-v2/style.json'
       : 'https://tiles.openfreemap.org/styles/bright';
+    const fallbackMapStyle = {
+      version: 8,
+      sources: {},
+      layers: [{
+        id: 'fallback-background',
+        type: 'background',
+        paint: { 'background-color': '#dfe7e1' }
+      }]
+    };
 
     const map = new maplibregl.Map({
       container: 'map',
@@ -1058,12 +1067,25 @@
       }});
     }
 
+    let fallbackMapActive = false;
+    let mapLoadTimer = 0;
+    const useFallbackMap = () => {
+      if (mapReady || fallbackMapActive) return;
+      fallbackMapActive = true;
+      setStatus('The street map is unavailable. Loading a simple route background…');
+      map.setStyle(fallbackMapStyle, { diff: false });
+    };
     const mapLoaded = new Promise((resolve) => {
       map.once('style.load', () => {
+        if (mapLoadTimer) clearTimeout(mapLoadTimer);
         addMapLayers();
         mapReady = true;
         resolve();
       });
+      map.on('error', () => {
+        if (!mapReady) useFallbackMap();
+      });
+      mapLoadTimer = setTimeout(useFallbackMap, 6000);
     });
 
     function openRouteDatabase() {
@@ -1729,6 +1751,11 @@
     async function importRoute(file) {
       if (!file) return;
       try {
+        const routeName = cleanFileName(file.name);
+        setStatus(`Opening ${routeName}…`);
+        if (!ui.emptyState.hidden) {
+          ui.emptyState.querySelector('p').textContent = `Opening ${routeName}…`;
+        }
         const format = routeFormat(file.name);
         if (!format) throw new Error('Choose a file ending in .gpx or .fit.');
         const data = format === 'fit' ? await file.arrayBuffer() : await file.text();
@@ -1749,8 +1776,9 @@
 
     for (const input of ui.fileInputs) {
       input.addEventListener('change', async (event) => {
-        await importRoute(event.target.files[0]);
+        const file = event.target.files[0];
         for (const otherInput of ui.fileInputs) otherInput.value = '';
+        await importRoute(file);
       });
     }
 
