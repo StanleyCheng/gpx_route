@@ -861,7 +861,7 @@
         raf = requestAnimationFrame(step);
       };
       return {
-        start() { if (active) return; active = true; raf = requestAnimationFrame(step); },
+        start() { if (active) return; active = true; step(); },
         stop() { active = false; if (raf) cancelAnimationFrame(raf); raf = 0; },
         reset() {
           active = false;
@@ -1334,8 +1334,16 @@
       if (!recorder) return;
       const instance = recorder;
       recorder = null;
-      const result = await instance.stop();
-      if (captureCompositor) captureCompositor.stop();
+      let result = null;
+      try {
+        result = await instance.stop();
+      } catch (error) {
+        console.warn('Recorder: failed to finalize', error);
+        showRecError(`Recording could not be finalized: ${error.message}`);
+        setStatus(`Recording failed: ${error.message}`);
+      } finally {
+        if (captureCompositor) captureCompositor.stop();
+      }
       if (result && result.blob && result.blob.size > 0) {
         const thumbnail = captureCanvasSnapshot();
         showRecordDialog(result, thumbnail);
